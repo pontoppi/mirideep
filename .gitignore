@@ -1,4 +1,3 @@
-build
-dist
-*.pyc
-*.egg-info
+build/
+dist/
+mirideep.egg-info/

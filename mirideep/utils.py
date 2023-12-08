@@ -4,7 +4,7 @@ import matplotlib.pylab as plt
 from astropy.io import ascii
 from astropy.modeling import models, fitting
 
-def fit_wavecorr(module,plot_wavefit=True):
+def fit_wavecorr(module,plot_wavefit=False):
 
 	# Read wavelength correction
 	local_path = os.path.join(os.path.dirname(__file__), 'rsrfs')
