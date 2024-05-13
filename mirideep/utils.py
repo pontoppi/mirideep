@@ -3,8 +3,13 @@ import numpy as np
 import matplotlib.pylab as plt
 from astropy.io import ascii
 from astropy.modeling import models, fitting
+from scipy.signal import medfilt
 
-def fit_wavecorr(module,plot_wavefit=False):
+cc = 299792.458
+
+def fit_wavecorr(module,plot_wavefit=False,vhelio=16.71):
+
+	# vhelio is the velocity of the source used to fit the wavelengths in km/s. 16.71 km/s is the vhelio of FZ Tau.
 
 	# Read wavelength correction
 	local_path = os.path.join(os.path.dirname(__file__), 'rsrfs')
@@ -25,8 +30,11 @@ def fit_wavecorr(module,plot_wavefit=False):
 			 'ch4long':(24.19,27.90)}
 
 	gsubs = np.where((refcor['WL'].data>edges[module][0]) & (refcor['WL'].data<edges[module][1]))
-	wl = refcor['WL'][gsubs]
-	sh = refcor['SHIFT'][gsubs]
+	wl = refcor['WL'][gsubs] 
+	sh = refcor['SHIFT'][gsubs] + wl*vhelio/cc #retwavelengths in calibration source vhelio frame
+
+	# remove outliers
+	sh = medfilt(sh,3)
 
 	model_poly = models.Polynomial1D(degree=3)
 	fitter_poly = fitting.LinearLSQFitter()
@@ -39,4 +47,3 @@ def fit_wavecorr(module,plot_wavefit=False):
 
 	return best_fit_poly
 
-#fit_wavecorr()

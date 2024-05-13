@@ -14,6 +14,8 @@ from astropy.io import fits
 from astropy.modeling import models, fitting
 from astropy.stats import sigma_clipped_stats
 from astropy.convolution import convolve,Gaussian1DKernel
+from astropy.wcs import WCS
+from astropy.time import Time
 
 from photutils import aperture as ap
 from photutils import centroids
@@ -21,14 +23,37 @@ from photutils import centroids
 from .utils import *
 
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-__version__ = 7.1
+__version__ = 8.0
 
 class MiriDeepSpec():
+    '''
+    Primary class for MIRI deep
+
+    Input parameters:
+    -------------------
+    plot_centroid
+    shift_optimize
+    source
+    save_intermediate
+    bg_types
+    rrs
+    standard
+    ch1_standard
+    wave_correct
+    single_shift
+    clean_badpix
+    mask_ratio
+    source_cen
+
+    Outputs:
+    --------
+
+    '''
 
     def __init__(self,plot_centroid=False,shift_optimize=True,source='generic',save_intermediate=False,
                  bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'median'},
-                 rrs={'ch1':1.4,'ch2':1.4,'ch3':1.4,'ch4':1.4},standard='athalia',ch1_standard='hd163466_COM',
-                 wave_correct=True,single_shift=True,clean_badpix=True,mask_ratio=10):
+                 rrs={'ch1':1.4,'ch2':1.4,'ch3':1.4,'ch4':1.4},standard='jena2',ch1_standard='hd163466_COM',
+                 wave_correct=True,single_shift=True,clean_badpix=False,mask_ratio=20,source_cen=False):
         self.local_path = os.path.join(os.path.dirname(__file__), 'rsrfs')
         self.standard = standard
         self.ch1_standard = ch1_standard
@@ -41,6 +66,11 @@ class MiriDeepSpec():
         self.single_shift = single_shift
         self.clean_badpix = clean_badpix
         self.mask_ratio = mask_ratio
+        self.source_cen = source_cen
+
+        # Dummy time values for figuring out the total observation duration
+        self.exp_begin = Time('2050-01-01T00:00:00.0')
+        self.exp_end = Time('2020-01-01T00:00:00.0') 
 
         self.rrs = rrs
         self.bg_types = bg_types
@@ -145,16 +175,12 @@ class MiriDeepSpec():
                 med_all = np.nanmedian(np.stack(spec1ds).flatten())
                 for ii,spec1d in enumerate(spec1ds):
                     spec1ds[ii] *= med_all/np.nanmedian(spec1d)
-                    #plt.plot(wave,spec1ds[ii],alpha=0.5)
 
                 spec1ds = np.stack(spec1ds)
                 spec1d_med = np.nanmedian(spec1ds,axis=0)
                 #stats = sigma_clipped_stats(spec1ds,axis=0,maxiters=5,sigma=2)
                 spec1d_med = sigma_clipped_stats(spec1ds,axis=0,maxiters=3,sigma=2.,grow=False)[0]
                 spec1d_std = sigma_clipped_stats(spec1ds,axis=0,maxiters=1,sigma=5)[2]/2. #we could divide by 2 because we have 4 dithers.
-
-                #plt.plot(wave, spec1d_med, lw=3)
-                #plt.show()
 
                 waves.append(wave)
                 spec1d_meds.append(spec1d_med)
@@ -184,9 +210,11 @@ class MiriDeepSpec():
 
 
         if self.clean_badpix:
-            badpix = [3366,3370,3412,3580,4112,4113,4807,5382,5569,5614,9022,9023,9024,9029,9030,9416,
-                      9417,9425,9426,9550,9551,9557,9558,9913,9914,10026,10027,10028,10051,10052,
-                      10173,10174,10175,10181,10182,10183]
+            print('No current bad pixel table available!')
+            breakpoint()
+            #badpix = [3366,3370,3412,3580,4112,4113,4807,5382,5569,5614,9022,9023,9024,9029,9030,9416,
+            #          9417,9425,9426,9550,9551,9557,9558,9913,9914,10026,10027,10028,10051,10052,
+            #          10173,10174,10175,10181,10182,10183]
             self.flux_all[badpix] = np.nan
 
         self.writespec(self.wave_all,self.flux_all,self.std_all,outname=self.source + '_1d_v' + str(__version__)+'.fits')
@@ -203,8 +231,8 @@ class MiriDeepSpec():
             bb = BlackBody(temperature=temp)
             model = (bb(wave*u.micron) * scale).value
         if standard == 'athalia':
-            temp = 195*u.K
-            scale = 3.85e8
+            temp = 198*u.K
+            scale = 4.00e8
             bb = BlackBody(temperature=temp)
             model = (bb(wave*u.micron) * scale).value
         if 'hd163466' in standard:
@@ -230,7 +258,7 @@ class MiriDeepSpec():
                 dithers = [exposure for exposure in self.expdicts if exposure['channel']==channel if exposure['band']==band]
 
                 for dither in dithers:
-                    if bg_type=='nod':
+                    if self.bg_types['ch'+channel]:
                         bg_cube = self.bg(dither,dithers)
                         wave,spec1d,cen = self.extract(dither['file'],plot_centroid=self.plot_centroid,bg=bg_cube,rr=self.rrs['ch'+channel])
                     else:
@@ -248,9 +276,9 @@ class MiriDeepSpec():
 
     def get_rsrf(self):
         if self.ch1_standard=='hd163466_0723':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_6.3.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_8.0.npz'), 'rb')
         elif self.ch1_standard=='hd163466_COM':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_rsrf_6.1.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_rsrf_6.0.npz'), 'rb')
         else:
             print('Unknown channel 1 standard')
             breakpoint()            
@@ -259,11 +287,11 @@ class MiriDeepSpec():
         rsrf_file_ch1.close()
 
         if self.standard=='athalia':
-            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_6.3.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_8.0.npz'), 'rb')
         elif self.standard=='jena':
-            rsrf_file = open(os.path.join(self.local_path,'jena_rsrf_6.3.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'jena_rsrf_8.0.npz'), 'rb')
         elif self.standard=='jena2':
-            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_7.1.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_8.0.npz'), 'rb')
         else:
             print('Unknown standard')
             breakpoint()
@@ -295,6 +323,17 @@ class MiriDeepSpec():
         hdr = fits.getheader(cubefile,1)
         primary_hdr = fits.getheader(cubefile,0)
 
+        exp_begin = Time(primary_hdr['DATE-BEG'])
+        exp_end = Time(primary_hdr['DATE-END'])
+
+        if self.exp_begin>exp_begin:
+            self.exp_begin = exp_begin
+        if self.exp_end<exp_end:
+            self.exp_end = exp_end
+
+        self.last_hdr = primary_hdr # Store the latest header read to global
+
+
         if bg is not None:
             cube -= bg
         else:
@@ -302,6 +341,8 @@ class MiriDeepSpec():
                 cube[ii,:,:] -= np.nanmedian(cube[ii,:,:])
 
         nw = cube.shape[0]
+        nx = cube.shape[2]
+        ny = cube.shape[1]
         wave = (np.arange(nw))*hdr['CDELT3']+hdr['CRVAL3']
 
         # Correct for poor wavelength calibration in pipeline
@@ -318,13 +359,23 @@ class MiriDeepSpec():
 
         coll = np.nanmedian(cube[100:-100,:,:],axis=0)
         coll = np.nan_to_num(coll)
-        coll[0:4,:] = 0
-        coll[-4:,:] = 0 
-        coll[:,0:4] = 0 
-        coll[:,-4:] = 0 
-        
-        coll_mask = np.ma.masked_less(coll-np.nanmedian(coll),np.max(coll-np.nanmedian(coll))/self.mask_ratio)
-        cen = centroids.centroid_1dg(coll,mask=coll_mask.mask)
+
+        if self.source_cen:
+
+            wcs = WCS(hdr)
+            pix = wcs.wcs_world2pix(self.source_cen[0],self.source_cen[1],3,0)
+            center = (pix[0],pix[1])
+            #yy, xx = np.ogrid[:ny, :nx]
+            #dist_from_center = np.sqrt((yy - center[1])**2 + (xx-center[0])**2)
+            #coll_mask = np.ma.masked_greater(dist_from_center,2)
+            cen = center
+        else:          
+            coll[0:4,:] = 0
+            coll[-4:,:] = 0 
+            coll[:,0:4] = 0 
+            coll[:,-4:] = 0 
+            coll_mask = np.ma.masked_less(coll-np.nanmedian(coll),np.max(coll-np.nanmedian(coll))/self.mask_ratio)
+            cen = centroids.centroid_1dg(coll,mask=coll_mask.mask)
 
         spec1d = np.zeros(nw)
 
@@ -338,12 +389,18 @@ class MiriDeepSpec():
             spec1d[iw] = phot_val * scale_factor # Units in Jy
 
         if self.plot_centroid:
-            plt.imshow(coll)
-            #circ = Circle((cen[0],cen[1]),ap_radius)
-            #plt.patch(circ)
-            plt.plot(cen[0],cen[1],marker='*',color='red')
-            plt.show()
+            plt.style.use(['dark_background'])
+            fig = plt.figure(figsize=(5,4)) 
 
+            ax = fig.add_subplot(111)
+            im = ax.imshow(coll,cmap='magma',vmin=np.nanpercentile(coll,0.5),
+                           vmax=np.nanpercentile(coll,99.5),origin='lower')
+ 
+            circ = Circle((cen[0],cen[1]),ap_radius,edgecolor='orange',fill=False,lw=3)
+            ax.add_patch(circ)
+            ax.plot(cen[0],cen[1],marker='*',color='red')
+            plt.show()
+        
         # Interpolate nans
         bsubs = np.argwhere(np.isnan(spec1d))
         gsubs = np.argwhere(np.isfinite(spec1d))
@@ -356,15 +413,29 @@ class MiriDeepSpec():
 
         return wave,spec1d,cen
 
-    def scale(self,waves,spec1ds):
+    def scale(self,waves,spec1ds,maxscale=0.9):
 
         nsegs = len(waves)
+        scales = np.ones(nsegs)
         for ii in np.arange(nsegs-1)+1:
             osubs_left = np.where(waves[ii-1]>np.min(waves[ii]))
             osubs_right = np.where(waves[ii]<np.max(waves[ii-1]))
             scale = np.nanmedian(spec1ds[ii-1][osubs_left])/np.median(spec1ds[ii][osubs_right])
-            spec1ds[ii] *= scale
-            print('scale:',scale)
+            
+            if ~np.isfinite(scale):
+                scale = 1.0
+
+            if np.abs(scales[ii]-1) < maxscale:
+                spec1ds[ii] *= scale
+                print('scale:',scale)
+                scales[ii] = scale
+            else:
+                print('Calculated scaling factor out of bounds. Not scaling')
+                scales[ii] = 1
+
+        #Renormalize scale to avoid increasing uncertainty toward longer wavelengths
+        for ii in np.arange(nsegs):
+            spec1ds[ii] /= np.nanmedian(scales)
 
         return spec1ds
 
@@ -413,21 +484,26 @@ class MiriDeepSpec():
 
         valleys = find_peaks(-peakspec)[0]
         
-        #largest negative valley:
-        valley_low = np.where(valleys - maxlag + 1 < 0, valleys, -np.inf).argmax()
-        #smallers positive valley:
-        valley_hi  = np.where(valleys - maxlag + 1 > 0, valleys, np.inf).argmin()
+        try:
+            #largest negative valley:
+            valley_low = np.where(valleys - maxlag + 1 < 0, valleys, -np.inf).argmax()
+            #smallers positive valley:
+            valley_hi  = np.where(valleys - maxlag + 1 > 0, valleys, np.inf).argmin()
 
-        #zero out areas outside of the main peak for stability
-        peakspec[:valleys[valley_low]] = 0
-        peakspec[valleys[valley_hi]:] = 0
+            #zero out areas outside of the main peak for stability
+            peakspec[:valleys[valley_low]] = 0
+            peakspec[valleys[valley_hi]:] = 0
 
-        #Convolving the peak spectrum makes the fit much easier and more stable
-        kernel = Gaussian1DKernel(stddev=2.0)
-        peakspec = convolve(peakspec,kernel)
+            #Convolving the peak spectrum makes the fit much easier and more stable
+            kernel = Gaussian1DKernel(stddev=2.0)
+            peakspec = convolve(peakspec,kernel)
 
-        fit = fitter_gauss(model_total, np.arange(maxlag*2), peakspec, maxiter=1000)
-        lag_fit = fit.mean_0.value - maxlag + 1
+            fit = fitter_gauss(model_total, np.arange(maxlag*2), peakspec, maxiter=1000)
+            lag_fit = fit.mean_0.value - maxlag + 1
+
+        except:
+            print('cross correlation failed - no valid values. Assuming lag==0')
+            lag_fit = 0
 
         if np.mean(wave)>40:
             fig = plt.figure(figsize=(4,9))
@@ -439,16 +515,52 @@ class MiriDeepSpec():
             ax2.plot(corr1)
             ax2.plot(corr2)
             fig.show()
-            breakpoint()
 
         return lag_fit
 
     def writespec(self,wave,fd,std,outname='spec1d.fits'):
-        c1 = fits.Column(name='wavelength', array=wave, format='F')
-        c2 = fits.Column(name='fluxdensity', array=fd, format='F')
-        c3 = fits.Column(name='fluxdensity_stddev', array=std, format='F')
+        c1 = fits.Column(name='wavelength', array=wave, format='F', unit='micron')
+        c2 = fits.Column(name='fluxdensity', array=fd, format='F', unit='Jy')
+        c3 = fits.Column(name='fluxdensity_stddev', array=std, format='F', unit='Jy')
 
         t = fits.BinTableHDU.from_columns([c1, c2, c3])
-        t.header['COMMENT'] = 'Processed by the JDISCS MIRI MRS pipeline v2'
-        t.header['COMMENT'] = 'Klaus Pontoppidan'
+
+        t.header['HLSPLEAD']  = ('Klaus M. Pontoppidan','HSLP Principal Investigator')
+        t.header['HLSPID'] = ('JDISCS','HLSP Identifier')
+        t.header['HLSPNAME'] = ('JWST Disk Infrared Spectroscopic Chemistry Survey','HLSP project')
+        t.header['HLSPTARG'] = (self.last_hdr['TARGNAME'],self.last_hdr.comments['TARGNAME'])
+        t.header['HLSPVER'] = (__version__,'Data version')
+        t.header['DOI'] = ('TBD','Digital Object Identifier')
+        t.header['LICENSE'] = ('CC BY 4.0','Data license')
+        t.header['LICENURL'] = ('https://creativecommons.org/licenses/by/4.0/','Data license URL')
+
+        t.header['PROPOSID']  = (self.last_hdr['PROGRAM'],self.last_hdr.comments['PROGRAM'])
+        t.header['VISIT_ID'] = (self.last_hdr['VISIT_ID'],self.last_hdr.comments['VISIT_ID'])
+        t.header['PI_NAME']  = (self.last_hdr['PI_NAME'],'Original program PI')
+        t.header['INSTRUME'] = ('MIRI','Instrument')
+        t.header['OBSERVAT'] = ('JWST','Observatory')
+        t.header['TELESCOP'] = ('JWST','Telescope')
+        t.header['DISPRSR'] = ('MRS','Dispersive element')
+        t.header['READPATT'] = (self.last_hdr['READPATT'],self.last_hdr.comments['READPATT'])
+
+        t.header['RADESYS']  = ('ICRS','Coordinate reference frame')
+        t.header['TARG_RA']  = (self.last_hdr['TARG_RA'],self.last_hdr.comments['TARG_RA'])
+        t.header['TARG_DEC'] = (self.last_hdr['TARG_DEC'],self.last_hdr.comments['TARG_DEC'])
+        t.header['SPECSYS'] = ('BARYCENT','Spectral reference frame')
+
+        t.header['TIMESYS'] = ('UTC','Code for time-related keywords')
+        t.header['XPOSURE'] = (self.last_hdr['EFFEXPTM']*self.last_hdr['NUMDTHPT'],'Total exposure time per sub-band')
+        t.header['DATE-BEG'] = (self.exp_begin.isot,'Date-time start of exposures')
+        t.header['DATE-END']   = (self.exp_end.isot,'Date-time end of exposures')
+         
+        t.header['BUNIT']  = ('Jy','Brightness unit for array values')
+
+        t.header['CAL_VER'] = (self.last_hdr['CAL_VER'],self.last_hdr.comments['CAL_VER'])
+        t.header['CRDS_VER'] = (self.last_hdr['CRDS_VER'],self.last_hdr.comments['CRDS_VER'])
+        t.header['CRDS_CTX'] = (self.last_hdr['CRDS_CTX'],self.last_hdr.comments['CRDS_CTX'])
+        t.header['STANDARD'] = (self.standard, 'RSRF standard')
+        t.header['CH1_STAN'] = (self.ch1_standard, 'RSRF standard for Channel 1')
+
+        t.header['DATE'] = (Time.now().isot, 'Time file was written by MIRIDeep')
+        t.header['COMMENT']  = 'Processed by the JDISCS MIRI MRS pipeline version '+str(__version__)
         t.writeto(outname,overwrite=True)
