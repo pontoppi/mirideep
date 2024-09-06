@@ -23,7 +23,7 @@ from photutils import centroids
 from .utils import *
 
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-__version__ = 8.0
+__version__ = 8.3
 
 class MiriDeepSpec():
     '''
@@ -189,11 +189,12 @@ class MiriDeepSpec():
         spec1d_meds = self.scale(waves,spec1d_meds)
 
         # Cut the low resolution end of overlapping segments
-        for ii,wave in enumerate(waves[:-1]):
-            ssubs = np.where(wave < np.min(waves[ii+1]))
-            waves[ii] = waves[ii][ssubs]
-            spec1d_meds[ii] = spec1d_meds[ii][ssubs]
-            spec1d_stds[ii] = spec1d_stds[ii][ssubs]
+        for ii in np.arange(len(waves)-1):
+            ssubs = np.where(waves[ii+1] > np.nanmax(waves[ii]))
+            waves[ii+1] = waves[ii+1][ssubs]
+            spec1d_meds[ii+1] = spec1d_meds[ii+1][ssubs]
+            spec1d_stds[ii+1] = spec1d_stds[ii+1][ssubs]
+
 
         waves_flat = np.concatenate(waves)
         spec1d_flat = np.concatenate(spec1d_meds)
@@ -233,6 +234,11 @@ class MiriDeepSpec():
         if standard == 'athalia':
             temp = 198*u.K
             scale = 4.00e8
+            bb = BlackBody(temperature=temp)
+            model = (bb(wave*u.micron) * scale).value
+        if standard == 'athalia2':
+            temp = 209*u.K
+            scale = 6.10e8
             bb = BlackBody(temperature=temp)
             model = (bb(wave*u.micron) * scale).value
         if 'hd163466' in standard:
@@ -276,7 +282,7 @@ class MiriDeepSpec():
 
     def get_rsrf(self):
         if self.ch1_standard=='hd163466_0723':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_8.0.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_8.1.npz'), 'rb')
         elif self.ch1_standard=='hd163466_COM':
             rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_rsrf_6.0.npz'), 'rb')
         else:
@@ -287,11 +293,13 @@ class MiriDeepSpec():
         rsrf_file_ch1.close()
 
         if self.standard=='athalia':
-            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_8.0.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_8.2.npz'), 'rb')
+        elif self.standard=='athalia2':
+            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_8.1.npz'), 'rb')
         elif self.standard=='jena':
             rsrf_file = open(os.path.join(self.local_path,'jena_rsrf_8.0.npz'), 'rb')
         elif self.standard=='jena2':
-            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_8.0.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_8.2.npz'), 'rb')
         else:
             print('Unknown standard')
             breakpoint()
@@ -475,7 +483,7 @@ class MiriDeepSpec():
         model_gauss.amplitude.min = 0
         model_gauss.amplitude.max = 1
 
-        model_line  = models.Linear1D(slope=0., intercept=0.0,fixed={'slope':True,'intercept':True})
+        model_line  = models.Linear1D(slope=0., intercept=0.0,fixed={'slope':False,'intercept':False})
         model_total = model_gauss+model_line
 
         fitter_gauss = fitting.LevMarLSQFitter()
@@ -495,7 +503,7 @@ class MiriDeepSpec():
             peakspec[valleys[valley_hi]:] = 0
 
             #Convolving the peak spectrum makes the fit much easier and more stable
-            kernel = Gaussian1DKernel(stddev=2.0)
+            kernel = Gaussian1DKernel(stddev=2.5)
             peakspec = convolve(peakspec,kernel)
 
             fit = fitter_gauss(model_total, np.arange(maxlag*2), peakspec, maxiter=1000)
