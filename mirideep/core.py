@@ -23,7 +23,7 @@ from photutils import centroids
 from .utils import *
 
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-__version__ = 8.3
+__version__ = 8.4
 
 class MiriDeepSpec():
     '''
@@ -159,9 +159,17 @@ class MiriDeepSpec():
 
                     spec1d_defringe = dither['spec1d']/rsrf_sh * model
 
-                    #plt.plot(wave,dither['spec1d'])
-                    #plt.plot(wave,rsrf_sh*np.nanmedian(dither['spec1d'])/np.nanmedian(rsrf_sh))
-                    #plt.show()
+                    '''
+                    fig = plt.figure()
+                    ax = fig.add_subplot(111)
+                    ax.plot(wave,dither['spec1d'] / np.nanmedian(dither['spec1d']),label='raw')
+                    ax.plot(wave,dither['spec1d']/rsrf_sh / np.nanmedian(dither['spec1d']/rsrf_sh),label='raw / rsrf')
+                    ax.plot(wave,dither['spec1d']/rsrf_sh * model / np.nanmedian(dither['spec1d']/rsrf_sh * model), label='raw / rsrf * model')
+                    ax.plot(wave,model/np.nanmedian(model), label='model')
+                    ax.legend()
+                    plt.show()
+                    '''
+
                     waves_intermediate.append(dither['wave'])
                     spec1ds_intermediate.append(dither['spec1d'])
                     rsrfs_intermediate.append((rsrf_sh/model)*np.nanmedian(dither['spec1d'])/np.nanmedian(rsrf_sh/model))
@@ -172,19 +180,21 @@ class MiriDeepSpec():
                     spec1ds.append(spec1d_defringe)
 
                 #renormalize to median so that the sigma clip rejection works better
-                med_all = np.nanmedian(np.stack(spec1ds).flatten())
-                for ii,spec1d in enumerate(spec1ds):
-                    spec1ds[ii] *= med_all/np.nanmedian(spec1d)
+                #Missing data should not fail, just be left out
+                if len(spec1ds)>0:
+                    med_all = np.nanmedian(np.stack(spec1ds).flatten())
+                    for ii,spec1d in enumerate(spec1ds):
+                        spec1ds[ii] *= med_all/np.nanmedian(spec1d)
 
-                spec1ds = np.stack(spec1ds)
-                spec1d_med = np.nanmedian(spec1ds,axis=0)
-                #stats = sigma_clipped_stats(spec1ds,axis=0,maxiters=5,sigma=2)
-                spec1d_med = sigma_clipped_stats(spec1ds,axis=0,maxiters=3,sigma=2.,grow=False)[0]
-                spec1d_std = sigma_clipped_stats(spec1ds,axis=0,maxiters=1,sigma=5)[2]/2. #we could divide by 2 because we have 4 dithers.
+                    spec1ds = np.stack(spec1ds)
+                    spec1d_med = np.nanmedian(spec1ds,axis=0)
+                    #stats = sigma_clipped_stats(spec1ds,axis=0,maxiters=5,sigma=2)
+                    spec1d_med = sigma_clipped_stats(spec1ds,axis=0,maxiters=3,sigma=2.,grow=False)[0]
+                    spec1d_std = sigma_clipped_stats(spec1ds,axis=0,maxiters=1,sigma=5)[2]/2. #we could divide by 2 because we have 4 dithers.
 
-                waves.append(wave)
-                spec1d_meds.append(spec1d_med)
-                spec1d_stds.append(spec1d_std)
+                    waves.append(wave)
+                    spec1d_meds.append(spec1d_med)
+                    spec1d_stds.append(spec1d_std)
 
         spec1d_meds = self.scale(waves,spec1d_meds)
 
@@ -283,6 +293,8 @@ class MiriDeepSpec():
     def get_rsrf(self):
         if self.ch1_standard=='hd163466_0723':
             rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_8.1.npz'), 'rb')
+        elif self.ch1_standard=='hd163466_0624':
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_8.4.npz'), 'rb')
         elif self.ch1_standard=='hd163466_COM':
             rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_rsrf_6.0.npz'), 'rb')
         else:
@@ -293,13 +305,13 @@ class MiriDeepSpec():
         rsrf_file_ch1.close()
 
         if self.standard=='athalia':
-            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_8.2.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_8.1.npz'), 'rb')
         elif self.standard=='athalia2':
-            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_8.1.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_8.4.npz'), 'rb')
         elif self.standard=='jena':
             rsrf_file = open(os.path.join(self.local_path,'jena_rsrf_8.0.npz'), 'rb')
         elif self.standard=='jena2':
-            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_8.2.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_8.1.npz'), 'rb')
         else:
             print('Unknown standard')
             breakpoint()
