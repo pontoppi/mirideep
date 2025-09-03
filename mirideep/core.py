@@ -292,7 +292,7 @@ class MiriDeepSpec():
 
     def get_rsrf(self):
         if self.ch1_standard=='hd163466_0723':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_8.1.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_8.4.npz'), 'rb')
         elif self.ch1_standard=='hd163466_0624':
             rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_8.4.npz'), 'rb')
         elif self.ch1_standard=='hd163466_COM':
@@ -305,13 +305,13 @@ class MiriDeepSpec():
         rsrf_file_ch1.close()
 
         if self.standard=='athalia':
-            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_8.1.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_8.4.npz'), 'rb')
         elif self.standard=='athalia2':
             rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_8.4.npz'), 'rb')
         elif self.standard=='jena':
             rsrf_file = open(os.path.join(self.local_path,'jena_rsrf_8.0.npz'), 'rb')
         elif self.standard=='jena2':
-            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_8.1.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_8.4.npz'), 'rb')
         else:
             print('Unknown standard')
             breakpoint()
@@ -466,7 +466,6 @@ class MiriDeepSpec():
             #We can exclude the dither we are using from the bg estimation
             if bg_dither['file'] != dither['file']:
                 cubes.append(fits.getdata(bg_dither['file']))
-
         bg_all = np.stack(cubes)
         bg_cube = np.nanmedian(bg_all, axis=0)
         return bg_cube
