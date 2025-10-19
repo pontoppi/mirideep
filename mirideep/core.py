@@ -23,7 +23,7 @@ from photutils import centroids
 from .utils import *
 
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-__version__ = 8.4
+__version__ = 9.0
 
 class MiriDeepSpec():
     '''
@@ -247,8 +247,8 @@ class MiriDeepSpec():
             bb = BlackBody(temperature=temp)
             model = (bb(wave*u.micron) * scale).value
         if standard == 'athalia2':
-            temp = 209*u.K
-            scale = 6.10e8
+            temp = 207*u.K
+            scale = 7.40e8
             bb = BlackBody(temperature=temp)
             model = (bb(wave*u.micron) * scale).value
         if 'hd163466' in standard:
@@ -291,12 +291,16 @@ class MiriDeepSpec():
             pickle.dump(settings, pickleFile)
 
     def get_rsrf(self):
-        if self.ch1_standard=='hd163466_0723':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_8.4.npz'), 'rb')
+        if self.ch1_standard=='hd163466_0823':
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0823_rsrf_9.0.npz'), 'rb')
+        elif self.ch1_standard=='hd163466_0723':
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_9.0.npz'), 'rb')
         elif self.ch1_standard=='hd163466_0624':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_8.4.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_9.0.npz'), 'rb')
         elif self.ch1_standard=='hd163466_COM':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_rsrf_6.0.npz'), 'rb')
+            print("This option is deprecated")
+            breakpoint()
+            #rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_rsrf_6.0.npz'), 'rb')
         else:
             print('Unknown channel 1 standard')
             breakpoint()            
@@ -305,13 +309,15 @@ class MiriDeepSpec():
         rsrf_file_ch1.close()
 
         if self.standard=='athalia':
-            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_8.4.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_9.0.npz'), 'rb')
         elif self.standard=='athalia2':
-            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_8.4.npz'), 'rb')
-        elif self.standard=='jena':
-            rsrf_file = open(os.path.join(self.local_path,'jena_rsrf_8.0.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_9.0.npz'), 'rb')
         elif self.standard=='jena2':
-            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_8.4.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_9.0.npz'), 'rb')
+        elif self.standard=='jena':
+            print("This option is deprecated")
+            breakpoint()
+            #rsrf_file = open(os.path.join(self.local_path,'jena_rsrf_8.0.npz'), 'rb')
         else:
             print('Unknown standard')
             breakpoint()
@@ -324,6 +330,8 @@ class MiriDeepSpec():
 
         self.expdicts = []
         cubefiles = [datafile for datafile in datafiles if '_s3d.fits' in datafile]
+        exp_begins = []
+        exp_ends   = []
         for cubefile in cubefiles:
             expdict = {}
             hdr = fits.getheader(cubefile)
@@ -332,10 +340,17 @@ class MiriDeepSpec():
             expdict['band'] = hdr['BAND'].lower()
             expdict['dither'] = hdr['PATT_NUM']
             expdict['pattern'] = hdr['PATTTYPE'].lower()
-            
+            exp_begins.append(hdr['EXPSTART'])
+            exp_ends.append(hdr['EXPEND'])
+
             if expdict['pattern'] != '4-point':
                 raise ValueError('Only the 4-point dither pattern is currently supported')
             self.expdicts.append(expdict)
+
+        self.exp_begin = np.min(exp_begins)
+        self.exp_end   = np.min(exp_ends)
+        self.exp_mid   = np.mean([self.exp_begin,self.exp_end])
+
 
     def extract(self,cubefile,rr=1.7,plot_centroid=False,bg=None):
 
@@ -343,16 +358,7 @@ class MiriDeepSpec():
         hdr = fits.getheader(cubefile,1)
         primary_hdr = fits.getheader(cubefile,0)
 
-        exp_begin = Time(primary_hdr['DATE-BEG'])
-        exp_end = Time(primary_hdr['DATE-END'])
-
-        if self.exp_begin>exp_begin:
-            self.exp_begin = exp_begin
-        if self.exp_end<exp_end:
-            self.exp_end = exp_end
-
         self.last_hdr = primary_hdr # Store the latest header read to global
-
 
         if bg is not None:
             cube -= bg
@@ -542,44 +548,50 @@ class MiriDeepSpec():
         c2 = fits.Column(name='fluxdensity', array=fd, format='F', unit='Jy')
         c3 = fits.Column(name='fluxdensity_stddev', array=std, format='F', unit='Jy')
 
-        t = fits.BinTableHDU.from_columns([c1, c2, c3])
+        primary = fits.PrimaryHDU()
+        t       = fits.BinTableHDU.from_columns([c1, c2, c3])
+        
+        primary.header['DATE']     = (Time.now().isot, 'Time file was written by MIRIDeep')
+        primary.header['COMMENT']  = 'Processed by the JDISCS MIRI MRS pipeline version '+str(__version__)
+        primary.header['DOI']      = ('10.17909/tfk0-pa32','Digital Object Identifier')
+        primary.header['HLSPLEAD'] = ('Klaus M. Pontoppidan','HSLP Principal Investigator')
+        primary.header['HLSPID']   = ('JDISCS','HLSP Identifier')
+        primary.header['HLSPNAME'] = ('JWST Disk Infrared Spectroscopic Chemistry Survey','HLSP project')
+        primary.header['HLSPTARG'] = (self.last_hdr['TARGNAME'],self.last_hdr.comments['TARGNAME'])
+        primary.header['HLSPVER']  = (__version__,'Data version')
+        primary.header['LICENSE']  = ('CC BY 4.0','Data license')
+        primary.header['LICENURL'] = ('https://creativecommons.org/licenses/by/4.0/','Data license URL')
 
-        t.header['HLSPLEAD']  = ('Klaus M. Pontoppidan','HSLP Principal Investigator')
-        t.header['HLSPID'] = ('JDISCS','HLSP Identifier')
-        t.header['HLSPNAME'] = ('JWST Disk Infrared Spectroscopic Chemistry Survey','HLSP project')
-        t.header['HLSPTARG'] = (self.last_hdr['TARGNAME'],self.last_hdr.comments['TARGNAME'])
-        t.header['HLSPVER'] = (__version__,'Data version')
-        t.header['DOI'] = ('TBD','Digital Object Identifier')
-        t.header['LICENSE'] = ('CC BY 4.0','Data license')
-        t.header['LICENURL'] = ('https://creativecommons.org/licenses/by/4.0/','Data license URL')
+        primary.header['PROPOSID'] = (self.last_hdr['PROGRAM'],self.last_hdr.comments['PROGRAM'])
+        primary.header['VISIT_ID'] = (self.last_hdr['VISIT_ID'],self.last_hdr.comments['VISIT_ID'])
+        primary.header['PI_NAME']  = (self.last_hdr['PI_NAME'],'Original program PI')
+        primary.header['INSTRUME'] = ('MIRI','Instrument')
+        primary.header['OBSERVAT'] = ('JWST','Observatory')
+        primary.header['TELESCOP'] = ('JWST','Telescope')
+        primary.header['DISPRSR']  = ('MRS','Dispersive element')
+        primary.header['READPATT'] = (self.last_hdr['READPATT'],self.last_hdr.comments['READPATT'])
 
-        t.header['PROPOSID']  = (self.last_hdr['PROGRAM'],self.last_hdr.comments['PROGRAM'])
-        t.header['VISIT_ID'] = (self.last_hdr['VISIT_ID'],self.last_hdr.comments['VISIT_ID'])
-        t.header['PI_NAME']  = (self.last_hdr['PI_NAME'],'Original program PI')
-        t.header['INSTRUME'] = ('MIRI','Instrument')
-        t.header['OBSERVAT'] = ('JWST','Observatory')
-        t.header['TELESCOP'] = ('JWST','Telescope')
-        t.header['DISPRSR'] = ('MRS','Dispersive element')
-        t.header['READPATT'] = (self.last_hdr['READPATT'],self.last_hdr.comments['READPATT'])
+        primary.header['RADESYS']  = ('ICRS','Coordinate reference frame')
+        primary.header['TARG_RA']  = (self.last_hdr['TARG_RA'],self.last_hdr.comments['TARG_RA'])
+        primary.header['TARG_DEC'] = (self.last_hdr['TARG_DEC'],self.last_hdr.comments['TARG_DEC'])
+        primary.header['SPECSYS']  = ('BARYCENT','Spectral reference frame')
 
-        t.header['RADESYS']  = ('ICRS','Coordinate reference frame')
-        t.header['TARG_RA']  = (self.last_hdr['TARG_RA'],self.last_hdr.comments['TARG_RA'])
-        t.header['TARG_DEC'] = (self.last_hdr['TARG_DEC'],self.last_hdr.comments['TARG_DEC'])
-        t.header['SPECSYS'] = ('BARYCENT','Spectral reference frame')
+        primary.header['TIMESYS']  = ('UTC','Code for time-related keywords')
+        primary.header['XPOSURE']  = (self.last_hdr['EFFEXPTM']*self.last_hdr['NUMDTHPT'],'Total exposure time per sub-band')
+        
+        primary.header['DATE-BEG'] = (Time(self.exp_begin, format='mjd').isot,'Date-time start of exposures')
+        primary.header['DATE-END'] = (Time(self.exp_end, format='mjd').isot,'Date-time end of exposures')
+        primary.header['DATE-AVG'] = (Time(self.exp_mid, format='mjd').isot,'Date-time middle of exposures')
+        
+        primary.header['MJD-BEG']  = (self.exp_begin,'Start time of observation expressed as MJD')
+        primary.header['MJD-END']  = (self.exp_end,'End time of observation expressed as MJD')
+        primary.header['MJD-MID']  = (self.exp_mid,'Mid time of observation expressed as MJD')
 
-        t.header['TIMESYS'] = ('UTC','Code for time-related keywords')
-        t.header['XPOSURE'] = (self.last_hdr['EFFEXPTM']*self.last_hdr['NUMDTHPT'],'Total exposure time per sub-band')
-        t.header['DATE-BEG'] = (self.exp_begin.isot,'Date-time start of exposures')
-        t.header['DATE-END']   = (self.exp_end.isot,'Date-time end of exposures')
-         
-        t.header['BUNIT']  = ('Jy','Brightness unit for array values')
+        primary.header['CAL_VER']  = (self.last_hdr['CAL_VER'],self.last_hdr.comments['CAL_VER'])
+        primary.header['CRDS_VER'] = (self.last_hdr['CRDS_VER'],self.last_hdr.comments['CRDS_VER'])
+        primary.header['CRDS_CTX'] = (self.last_hdr['CRDS_CTX'],self.last_hdr.comments['CRDS_CTX'])
+        primary.header['STANDARD'] = (self.standard, 'RSRF standard')
+        primary.header['CH1_STAN'] = (self.ch1_standard, 'RSRF standard for Channel 1')
 
-        t.header['CAL_VER'] = (self.last_hdr['CAL_VER'],self.last_hdr.comments['CAL_VER'])
-        t.header['CRDS_VER'] = (self.last_hdr['CRDS_VER'],self.last_hdr.comments['CRDS_VER'])
-        t.header['CRDS_CTX'] = (self.last_hdr['CRDS_CTX'],self.last_hdr.comments['CRDS_CTX'])
-        t.header['STANDARD'] = (self.standard, 'RSRF standard')
-        t.header['CH1_STAN'] = (self.ch1_standard, 'RSRF standard for Channel 1')
-
-        t.header['DATE'] = (Time.now().isot, 'Time file was written by MIRIDeep')
-        t.header['COMMENT']  = 'Processed by the JDISCS MIRI MRS pipeline version '+str(__version__)
-        t.writeto(outname,overwrite=True)
+        hdulist = fits.HDUList([primary,t])
+        hdulist.writeto(outname,overwrite=True)
