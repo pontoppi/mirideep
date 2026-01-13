@@ -23,7 +23,7 @@ from photutils import centroids
 from .utils import *
 
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-__version__ = 9.0
+__version__ = 9.1
 
 class MiriDeepSpec():
     '''
@@ -54,10 +54,10 @@ class MiriDeepSpec():
                  bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'median'},
                  rrs={'ch1':1.4,'ch2':1.4,'ch3':1.4,'ch4':1.4},standard='jena2',ch1_standard='hd163466_COM',
                  wave_correct=True,single_shift=True,clean_badpix=False,mask_ratio=20,source_cen=False):
+
         self.local_path = os.path.join(os.path.dirname(__file__), 'rsrfs')
         self.standard = standard
         self.ch1_standard = ch1_standard
-        self.get_rsrf()
         self.plot_centroid = plot_centroid
         self.shift_optimize = shift_optimize
         self.source = source
@@ -76,8 +76,8 @@ class MiriDeepSpec():
         self.bg_types = bg_types
 
     def run_extract(self):
-
         self.find_cubes()
+        self.get_rsrf()
 
         settings = {}
         waves = []
@@ -231,26 +231,37 @@ class MiriDeepSpec():
         self.writespec(self.wave_all,self.flux_all,self.std_all,outname=self.source + '_1d_v' + str(__version__)+'.fits')
 
     def standard_model(self,wave,standard='jena'):
+        #nn = 6 # flatness of silicate feature
+        #sil_cen = 10.2 # center of silicate feature
+        #sil_amp = 0.035 # amplitude of silicate feature
+        #sil_width = 1.5
+        #eta = np.ones(wave.size)*0.9
+        #eta += sil_amp * np.exp(-((wave - sil_cen) / sil_width)**nn)
+        
+        emissivity_scl = (self.emissivity['Emissivity']-0.78)/7.0+0.85 + 0.12*np.exp(-(self.emissivity['Wavelength']-29)**2/9**2)
+        
+        eta = np.interp(wave,self.emissivity['Wavelength'],emissivity_scl)
+
         if standard == 'jena':
             temp = 199*u.K
             scale = 5.77e8
             bb = BlackBody(temperature=temp)
-            model = (bb(wave*u.micron) * scale).value
+            model = (bb(wave*u.micron) * scale).value * eta
         if standard == 'jena2':
-            temp = 207*u.K
-            scale = 9.00e8
+            temp = 204*u.K
+            scale = 1.16e9
             bb = BlackBody(temperature=temp)
-            model = (bb(wave*u.micron) * scale).value
+            model = (bb(wave*u.micron) * scale).value * eta
         if standard == 'athalia':
-            temp = 198*u.K
-            scale = 4.00e8
+            temp = 194*u.K
+            scale = 5.6e8
             bb = BlackBody(temperature=temp)
-            model = (bb(wave*u.micron) * scale).value
+            model = (bb(wave*u.micron) * scale).value * eta
         if standard == 'athalia2':
-            temp = 207*u.K
-            scale = 7.40e8
+            temp = 206*u.K
+            scale = 8.50e8
             bb = BlackBody(temperature=temp)
-            model = (bb(wave*u.micron) * scale).value
+            model = (bb(wave*u.micron) * scale).value * eta
         if 'hd163466' in standard:
             vsh = 0
             model_data = fits.getdata(os.path.join(self.local_path,'hd163466_mod_003.fits'),1)
@@ -292,11 +303,11 @@ class MiriDeepSpec():
 
     def get_rsrf(self):
         if self.ch1_standard=='hd163466_0823':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0823_rsrf_9.0.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0823_rsrf_9.1.npz'), 'rb')
         elif self.ch1_standard=='hd163466_0723':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_9.0.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_9.1.npz'), 'rb')
         elif self.ch1_standard=='hd163466_0624':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_9.0.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_9.1.npz'), 'rb')
         elif self.ch1_standard=='hd163466_COM':
             print("This option is deprecated")
             breakpoint()
@@ -309,11 +320,11 @@ class MiriDeepSpec():
         rsrf_file_ch1.close()
 
         if self.standard=='athalia':
-            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_9.0.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_9.1.npz'), 'rb')
         elif self.standard=='athalia2':
-            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_9.0.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_9.1.npz'), 'rb')
         elif self.standard=='jena2':
-            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_9.0.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_9.1.npz'), 'rb')
         elif self.standard=='jena':
             print("This option is deprecated")
             breakpoint()
@@ -324,6 +335,9 @@ class MiriDeepSpec():
 
         self.rsrf = pickle.load(rsrf_file)
         rsrf_file.close()
+
+        # Finally get asteroid emissivity spectrum
+        self.emissivity = ascii.read(os.path.join(self.local_path,'emissivity.dat'))
 
     def find_cubes(self,path='.'):
         datafiles = os.listdir(path)
@@ -439,8 +453,9 @@ class MiriDeepSpec():
 
         return wave,spec1d,cen
 
-    def scale(self,waves,spec1ds,maxscale=0.9):
+    def scale(self,waves,spec1ds,maxscale=0.3):
 
+        module = ['ch1 A','ch1 B','ch1 C','ch2 A','ch2 B','ch2 C','ch3 A','ch3 B','ch3 C','ch4 A','ch4 B','ch4 C']
         nsegs = len(waves)
         scales = np.ones(nsegs)
         for ii in np.arange(nsegs-1)+1:
@@ -450,20 +465,22 @@ class MiriDeepSpec():
             
             if ~np.isfinite(scale):
                 scale = 1.0
-
-            if np.abs(scales[ii]-1) < maxscale:
+            elif maxscale < scale < 1/maxscale:
                 spec1ds[ii] *= scale
-                print('scale:',scale)
+                print(module[ii]+': scale:',f'{(scale-1)*100:.3f}', '%')
                 scales[ii] = scale
             else:
-                print('Calculated scaling factor out of bounds. Not scaling')
+                print(module[ii]+': Calculated scaling factor out of bounds. Not scaling', f'{(scale-1)*100:.3f}', '%')
                 scales[ii] = 1
-
+            
         #Renormalize scale to avoid increasing uncertainty toward longer wavelengths
         for ii in np.arange(nsegs):
             spec1ds[ii] /= np.nanmedian(scales)
 
+
+        self.abs_flux_error = np.nanmean(np.abs(scales-1)*100)
         return spec1ds
+
 
     def bg(self,dither,dithers):
 
@@ -592,6 +609,9 @@ class MiriDeepSpec():
         primary.header['CRDS_CTX'] = (self.last_hdr['CRDS_CTX'],self.last_hdr.comments['CRDS_CTX'])
         primary.header['STANDARD'] = (self.standard, 'RSRF standard')
         primary.header['CH1_STAN'] = (self.ch1_standard, 'RSRF standard for Channel 1')
+
+        primary.header['ABSFLUXE'] = (f'{self.abs_flux_error:.3f}', 'Error on absolute flux (%)')
+
 
         hdulist = fits.HDUList([primary,t])
         hdulist.writeto(outname,overwrite=True)
