@@ -6,6 +6,7 @@ import numpy as np
 from scipy.signal import savgol_filter,correlate,medfilt,find_peaks
 import matplotlib.pylab as plt
 from matplotlib.patches import Circle
+import copy
 
 from astropy.modeling.models import BlackBody
 from astropy.convolution import convolve, Gaussian1DKernel
@@ -23,7 +24,7 @@ from photutils import centroids
 from .utils import *
 
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-__version__ = 9.1
+__version__ = 9.3
 
 class MiriDeepSpec():
     '''
@@ -51,9 +52,10 @@ class MiriDeepSpec():
     '''
 
     def __init__(self,plot_centroid=False,shift_optimize=True,source='generic',save_intermediate=False,
-                 bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'median'},
+                 bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'nod'},
                  rrs={'ch1':1.4,'ch2':1.4,'ch3':1.4,'ch4':1.4},standard='jena2',ch1_standard='hd163466_COM',
-                 wave_correct=True,single_shift=True,clean_badpix=False,mask_ratio=20,source_cen=False):
+                 wave_correct=True,single_shift=True,clean_badpix=False,mask_ratio=20,centroid_type='1dg',
+                 source_cen=False,scale_to_segment=False):
 
         self.local_path = os.path.join(os.path.dirname(__file__), 'rsrfs')
         self.standard = standard
@@ -67,6 +69,8 @@ class MiriDeepSpec():
         self.clean_badpix = clean_badpix
         self.mask_ratio = mask_ratio
         self.source_cen = source_cen
+        self.centroid_type = centroid_type
+        self.scale_to_segment = scale_to_segment
 
         # Dummy time values for figuring out the total observation duration
         self.exp_begin = Time('2050-01-01T00:00:00.0')
@@ -104,13 +108,18 @@ class MiriDeepSpec():
                 spec1ds = []
                 lags = []
                 for dither in dithers:
-                    # which background to use? This was made because ch4 beams overlap in the 4-point dither
-                    if self.bg_types['ch'+channel] == 'nod':
+                    # which background to use? This was made because ch4 beams overlap in the 4-point extended dither pattern
+                    if 'nod' in self.bg_types['ch'+channel]:
                         bg_cube = self.bg(dither,dithers)
                     else:
                         bg_cube = None
 
-                    wave,spec1d,cen = self.extract(dither['file'],plot_centroid=self.plot_centroid,bg=bg_cube,rr=self.rrs['ch'+channel])
+                    if 'annulus' in self.bg_types['ch'+channel]:
+                        self.secondary_bg = True
+                    else:
+                        self.secondary_bg = False
+
+                    wave,spec1d,cen = self.extract(dither['file'],plot_centroid=self.plot_centroid,bg=bg_cube,rr=self.rrs['ch'+channel],secondary_bg=self.secondary_bg)
                     dither['wave'] = wave
                     dither['spec1d'] = spec1d
                     dither['cen'] = cen
@@ -187,7 +196,7 @@ class MiriDeepSpec():
                         spec1ds[ii] *= med_all/np.nanmedian(spec1d)
 
                     spec1ds = np.stack(spec1ds)
-                    spec1d_med = np.nanmedian(spec1ds,axis=0)
+                    #spec1d_med = np.nanmedian(spec1ds,axis=0)
                     #stats = sigma_clipped_stats(spec1ds,axis=0,maxiters=5,sigma=2)
                     spec1d_med = sigma_clipped_stats(spec1ds,axis=0,maxiters=3,sigma=2.,grow=False)[0]
                     spec1d_std = sigma_clipped_stats(spec1ds,axis=0,maxiters=1,sigma=5)[2]/2. #we could divide by 2 because we have 4 dithers.
@@ -262,6 +271,11 @@ class MiriDeepSpec():
             scale = 8.50e8
             bb = BlackBody(temperature=temp)
             model = (bb(wave*u.micron) * scale).value * eta
+        if standard == 'athalia3':
+            temp = 231*u.K
+            scale = 10.3e8
+            bb = BlackBody(temperature=temp)
+            model = (bb(wave*u.micron) * scale).value * eta
         if 'hd163466' in standard:
             vsh = 0
             model_data = fits.getdata(os.path.join(self.local_path,'hd163466_mod_003.fits'),1)
@@ -323,6 +337,8 @@ class MiriDeepSpec():
             rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_9.1.npz'), 'rb')
         elif self.standard=='athalia2':
             rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_9.1.npz'), 'rb')
+        elif self.standard=='athalia3':
+            rsrf_file = open(os.path.join(self.local_path,'athalia3_rsrf_9.2.npz'), 'rb')
         elif self.standard=='jena2':
             rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_9.1.npz'), 'rb')
         elif self.standard=='jena':
@@ -366,7 +382,7 @@ class MiriDeepSpec():
         self.exp_mid   = np.mean([self.exp_begin,self.exp_end])
 
 
-    def extract(self,cubefile,rr=1.7,plot_centroid=False,bg=None):
+    def extract(self,cubefile,rr=1.7,plot_centroid=False,bg=None,clean_nan=True,secondary_bg=False):
 
         cube = fits.getdata(cubefile)
         hdr = fits.getheader(cubefile,1)
@@ -377,8 +393,12 @@ class MiriDeepSpec():
         if bg is not None:
             cube -= bg
         else:
+            # we this background subtraction, but do we want that (since we subtract by nodding or median separately)?
             for ii in np.arange(cube.shape[0]):
                 cube[ii,:,:] -= np.nanmedian(cube[ii,:,:])
+        
+        if clean_nan:
+            cube[~np.isfinite(cube)] = 0.0
 
         nw = cube.shape[0]
         nx = cube.shape[2]
@@ -398,24 +418,44 @@ class MiriDeepSpec():
         scale_factor = 1e6 * px_area # ---> Jy
 
         coll = np.nanmedian(cube[100:-100,:,:],axis=0)
-        coll = np.nan_to_num(coll)
 
         if self.source_cen:
 
             wcs = WCS(hdr)
             pix = wcs.wcs_world2pix(self.source_cen[0],self.source_cen[1],3,0)
             center = (pix[0],pix[1])
-            #yy, xx = np.ogrid[:ny, :nx]
-            #dist_from_center = np.sqrt((yy - center[1])**2 + (xx-center[0])**2)
-            #coll_mask = np.ma.masked_greater(dist_from_center,2)
             cen = center
-        else:          
-            coll[0:4,:] = 0
-            coll[-4:,:] = 0 
-            coll[:,0:4] = 0 
-            coll[:,-4:] = 0 
-            coll_mask = np.ma.masked_less(coll-np.nanmedian(coll),np.max(coll-np.nanmedian(coll))/self.mask_ratio)
-            cen = centroids.centroid_1dg(coll,mask=coll_mask.mask)
+        else:        
+            if self.centroid_type=='1dg':  
+                coll[0:4,:] = 0
+                coll[-4:,:] = 0 
+                coll[:,0:4] = 0 
+                coll[:,-4:] = 0 
+                coll_mask = np.ma.masked_less(coll-np.nanmedian(coll),np.max(coll-np.nanmedian(coll))/self.mask_ratio)
+                cen = centroids.centroid_1dg(coll,mask=coll_mask.mask)
+            elif self.centroid_type=='max':
+
+                coll_mask = np.ma.masked_less(coll-np.nanmedian(coll),np.max(coll-np.nanmedian(coll))/self.mask_ratio)                
+                # indices of top 5 values
+                nmax = 5
+                coll[~np.isfinite(coll)] = 0
+                max_indices = np.zeros(nmax, dtype=int)
+                coll_tmp = copy.deepcopy(coll)
+                ii = 0
+                while ii<nmax:
+                    max_indices[ii] = np.nanargmax(coll_tmp)
+                    ymax,xmax = np.unravel_index(max_indices[ii], coll_tmp.shape)
+                    coll_tmp[ymax,xmax] = 0
+                    ii += 1
+                    
+                ymaxs = np.zeros(nmax)
+                xmaxs = np.zeros(nmax)
+                for ii,max_index in enumerate(max_indices):
+                    ymaxs[ii],xmaxs[ii] = np.unravel_index(max_index, coll.shape)
+
+                cen_coarse = (np.median(xmax),np.median(ymax))
+                cens = centroids.centroid_sources(coll, cen_coarse[0], cen_coarse[1], box_size=9,centroid_func=centroids.centroid_2dg)
+                cen = (cens[0][0],cens[1][0])
 
         spec1d = np.zeros(nw)
 
@@ -424,7 +464,16 @@ class MiriDeepSpec():
 
             ap_radius = 1.22*rr*206265*wave[iw]/6.5e6 / cdelt1 / 3600
             aperture = ap.CircularAperture(cen,r=ap_radius)
-            phot_table = ap.aperture_photometry(plane, [aperture])
+
+            if secondary_bg:
+                # If requested, subtract an additional annulus background now. This is important if the background has small-scale structure. 
+                # Note that this is in addition to the nod background subtraction. This helps with bad pixels and correlated noise.
+                annulus = ap.CircularAnnulus(cen, r_in=ap_radius*1.05, r_out=ap_radius*1.2)
+                bg_stats = ap.ApertureStats(data, annulus)
+                phot_table = ap.aperture_photometry(plane, [aperture],local_bkg=bg_stats.median)
+            else:
+                phot_table = ap.aperture_photometry(plane, [aperture])
+    
             phot_val = phot_table['aperture_sum_0'][0]
             spec1d[iw] = phot_val * scale_factor # Units in Jy
 
@@ -453,7 +502,7 @@ class MiriDeepSpec():
 
         return wave,spec1d,cen
 
-    def scale(self,waves,spec1ds,maxscale=0.3):
+    def scale(self,waves,spec1ds,maxscale=0.1):
 
         module = ['ch1 A','ch1 B','ch1 C','ch2 A','ch2 B','ch2 C','ch3 A','ch3 B','ch3 C','ch4 A','ch4 B','ch4 C']
         nsegs = len(waves)
@@ -474,8 +523,12 @@ class MiriDeepSpec():
                 scales[ii] = 1
             
         #Renormalize scale to avoid increasing uncertainty toward longer wavelengths
-        for ii in np.arange(nsegs):
-            spec1ds[ii] /= np.nanmedian(scales)
+        if self.scale_to_segment:
+            for ii in np.arange(nsegs):
+                spec1ds[ii] /= scales[self.scale_to_segment]
+        else:
+            for ii in np.arange(nsegs):
+                spec1ds[ii] /= np.nanmedian(scales)
 
 
         self.abs_flux_error = np.nanmean(np.abs(scales-1)*100)
@@ -508,9 +561,10 @@ class MiriDeepSpec():
         corr2[bsubs] = 0
 
         corr1[~np.isfinite(corr1)] = 0
-        corr2[~np.isfinite(corr1)] = 0
+        corr2[~np.isfinite(corr2)] = 0
 
-        corr = correlate(medfilt(corr1,1),medfilt(corr2,1),method='fft')
+        #corr = correlate(medfilt(corr1,1),medfilt(corr2,1),method='fft')
+        corr = correlate(corr1,corr2,method='fft')
         lag =  np.argmax(corr[spec1d.size-maxlag:spec1d.size+maxlag]) - maxlag + 1
 
         model_gauss = models.Gaussian1D(amplitude=np.max(corr), mean=maxlag+1, stddev=0.5)
@@ -548,15 +602,20 @@ class MiriDeepSpec():
             lag_fit = 0
 
         if np.mean(wave)>40:
-            fig = plt.figure(figsize=(4,9))
-            ax1 = fig.add_subplot(211)
-            ax2 = fig.add_subplot(212)
+            fig = plt.figure(figsize=(20,9))
+            ax1 = fig.add_subplot(311)
+            ax2 = fig.add_subplot(312)
+            ax3 = fig.add_subplot(313)
+            
             ax1.plot(np.arange(maxlag*2) - maxlag + 1, peakspec)
             ax1.plot(np.arange(maxlag*2) - maxlag + 1, fit(np.arange(maxlag*2)))
 
             ax2.plot(corr1)
-            ax2.plot(corr2)
-            fig.show()
+            corr2_sh = np.interp(np.arange(corr2.size)-lag_fit,np.arange(corr2.size),corr2)
+            ax2.plot(corr2_sh)
+
+            ax3.plot((corr1+1)/(corr2_sh+1))
+            plt.show()
 
         return lag_fit
 
