@@ -24,7 +24,7 @@ from photutils import centroids
 from .utils import *
 
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-__version__ = 9.3
+__version__ = 9.4
 
 class MiriDeepSpec():
     '''
@@ -51,22 +51,22 @@ class MiriDeepSpec():
 
     '''
 
-    def __init__(self,plot_centroid=False,shift_optimize=True,source='generic',save_intermediate=False,
+    def __init__(self,plot_centroid=False,plot_fringematch=False,shift_optimize=True,source='generic',save_intermediate=False,
                  bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'nod'},
                  rrs={'ch1':1.4,'ch2':1.4,'ch3':1.4,'ch4':1.4},standard='jena2',ch1_standard='hd163466_COM',
-                 wave_correct=True,single_shift=True,clean_badpix=False,mask_ratio=20,centroid_type='1dg',
+                 wave_correct=True,single_shift=True,mask_ratio=20,centroid_type='1dg',
                  source_cen=False,scale_to_segment=False):
 
         self.local_path = os.path.join(os.path.dirname(__file__), 'rsrfs')
         self.standard = standard
         self.ch1_standard = ch1_standard
         self.plot_centroid = plot_centroid
+        self.plot_fringematch = plot_fringematch
         self.shift_optimize = shift_optimize
         self.source = source
         self.save_intermediate = save_intermediate
         self.wave_correct = wave_correct
         self.single_shift = single_shift
-        self.clean_badpix = clean_badpix
         self.mask_ratio = mask_ratio
         self.source_cen = source_cen
         self.centroid_type = centroid_type
@@ -109,17 +109,9 @@ class MiriDeepSpec():
                 lags = []
                 for dither in dithers:
                     # which background to use? This was made because ch4 beams overlap in the 4-point extended dither pattern
-                    if 'nod' in self.bg_types['ch'+channel]:
-                        bg_cube = self.bg(dither,dithers)
-                    else:
-                        bg_cube = None
+                    bg_cube = self.bg(dither,dithers,self.bg_types['ch'+channel])
 
-                    if 'annulus' in self.bg_types['ch'+channel]:
-                        self.secondary_bg = True
-                    else:
-                        self.secondary_bg = False
-
-                    wave,spec1d,cen = self.extract(dither['file'],plot_centroid=self.plot_centroid,bg=bg_cube,rr=self.rrs['ch'+channel],secondary_bg=self.secondary_bg)
+                    wave,spec1d,cen = self.extract(dither['file'],plot_centroid=self.plot_centroid,bg=bg_cube,rr=self.rrs['ch'+channel])
                     dither['wave'] = wave
                     dither['spec1d'] = spec1d
                     dither['cen'] = cen
@@ -168,16 +160,16 @@ class MiriDeepSpec():
 
                     spec1d_defringe = dither['spec1d']/rsrf_sh * model
 
-                    '''
-                    fig = plt.figure()
-                    ax = fig.add_subplot(111)
-                    ax.plot(wave,dither['spec1d'] / np.nanmedian(dither['spec1d']),label='raw')
-                    ax.plot(wave,dither['spec1d']/rsrf_sh / np.nanmedian(dither['spec1d']/rsrf_sh),label='raw / rsrf')
-                    ax.plot(wave,dither['spec1d']/rsrf_sh * model / np.nanmedian(dither['spec1d']/rsrf_sh * model), label='raw / rsrf * model')
-                    ax.plot(wave,model/np.nanmedian(model), label='model')
-                    ax.legend()
-                    plt.show()
-                    '''
+                    if self.plot_fringematch:
+                        # Check on fringe match. Was used for debugging. 
+                        fig = plt.figure()
+                        ax = fig.add_subplot(111)
+                        ax.plot(wave,dither['spec1d'] / np.nanmedian(dither['spec1d']),label='raw')
+                        ax.plot(wave,dither['spec1d']/rsrf_sh / np.nanmedian(dither['spec1d']/rsrf_sh),label='raw / rsrf')
+                        ax.plot(wave,dither['spec1d']/rsrf_sh * model / np.nanmedian(dither['spec1d']/rsrf_sh * model), label='raw / rsrf * model')
+                        ax.plot(wave,model/np.nanmedian(model), label='model')
+                        ax.legend()
+                        plt.show()
 
                     waves_intermediate.append(dither['wave'])
                     spec1ds_intermediate.append(dither['spec1d'])
@@ -227,15 +219,6 @@ class MiriDeepSpec():
             with open(self.source+'_intermediates_v'+str(__version__)+'.npz', "wb") as pickleFile:
                 pickle.dump({'waves':waves_intermediate,'spec1ds':spec1ds_intermediate,
                              'rsrfs':rsrfs_intermediate,'ratios':ratios_intermediate,'cens':cens_intermediate, 'settings':settings_intermediate}, pickleFile)
-
-
-        if self.clean_badpix:
-            print('No current bad pixel table available!')
-            breakpoint()
-            #badpix = [3366,3370,3412,3580,4112,4113,4807,5382,5569,5614,9022,9023,9024,9029,9030,9416,
-            #          9417,9425,9426,9550,9551,9557,9558,9913,9914,10026,10027,10028,10051,10052,
-            #          10173,10174,10175,10181,10182,10183]
-            self.flux_all[badpix] = np.nan
 
         self.writespec(self.wave_all,self.flux_all,self.std_all,outname=self.source + '_1d_v' + str(__version__)+'.fits')
 
@@ -325,7 +308,6 @@ class MiriDeepSpec():
         elif self.ch1_standard=='hd163466_COM':
             print("This option is deprecated")
             breakpoint()
-            #rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_rsrf_6.0.npz'), 'rb')
         else:
             print('Unknown channel 1 standard')
             breakpoint()            
@@ -382,21 +364,17 @@ class MiriDeepSpec():
         self.exp_mid   = np.mean([self.exp_begin,self.exp_end])
 
 
-    def extract(self,cubefile,rr=1.7,plot_centroid=False,bg=None,clean_nan=True,secondary_bg=False):
+    def extract(self,cubefile,rr=1.7,plot_centroid=False,bg=None,clean_nan=True):
 
         cube = fits.getdata(cubefile)
         hdr = fits.getheader(cubefile,1)
         primary_hdr = fits.getheader(cubefile,0)
 
         self.last_hdr = primary_hdr # Store the latest header read to global
-
-        if bg is not None:
-            cube -= bg
-        else:
-            # we this background subtraction, but do we want that (since we subtract by nodding or median separately)?
-            for ii in np.arange(cube.shape[0]):
-                cube[ii,:,:] -= np.nanmedian(cube[ii,:,:])
         
+        # subtrqct the background
+        cube -= bg
+        #breakpoint()
         if clean_nan:
             cube[~np.isfinite(cube)] = 0.0
 
@@ -420,7 +398,6 @@ class MiriDeepSpec():
         coll = np.nanmedian(cube[100:-100,:,:],axis=0)
 
         if self.source_cen:
-
             wcs = WCS(hdr)
             pix = wcs.wcs_world2pix(self.source_cen[0],self.source_cen[1],3,0)
             center = (pix[0],pix[1])
@@ -462,17 +439,10 @@ class MiriDeepSpec():
         for iw in np.arange(nw):
             plane = cube[iw,:,:]
 
-            ap_radius = 1.22*rr*206265*wave[iw]/6.5e6 / cdelt1 / 3600
+            ap_radius = rr * self.difflimit(wave[iw],cdelt1)
             aperture = ap.CircularAperture(cen,r=ap_radius)
 
-            if secondary_bg:
-                # If requested, subtract an additional annulus background now. This is important if the background has small-scale structure. 
-                # Note that this is in addition to the nod background subtraction. This helps with bad pixels and correlated noise.
-                annulus = ap.CircularAnnulus(cen, r_in=ap_radius*1.05, r_out=ap_radius*1.2)
-                bg_stats = ap.ApertureStats(data, annulus)
-                phot_table = ap.aperture_photometry(plane, [aperture],local_bkg=bg_stats.median)
-            else:
-                phot_table = ap.aperture_photometry(plane, [aperture])
+            phot_table = ap.aperture_photometry(plane, [aperture])
     
             phot_val = phot_table['aperture_sum_0'][0]
             spec1d[iw] = phot_val * scale_factor # Units in Jy
@@ -501,6 +471,9 @@ class MiriDeepSpec():
                 spec1d[bsubs.flatten()] = np.nan
 
         return wave,spec1d,cen
+
+    def difflimit(self,wave,pixsize):
+        return 1.22*206265*wave/6.5e6 / pixsize / 3600
 
     def scale(self,waves,spec1ds,maxscale=0.1):
 
@@ -535,15 +508,149 @@ class MiriDeepSpec():
         return spec1ds
 
 
-    def bg(self,dither,dithers):
+    def bg(self,dither,dithers,bg_type='nod'):
 
-        cubes = []
-        for bg_dither in dithers:
-            #We can exclude the dither we are using from the bg estimation
-            if bg_dither['file'] != dither['file']:
-                cubes.append(fits.getdata(bg_dither['file']))
-        bg_all = np.stack(cubes)
-        bg_cube = np.nanmedian(bg_all, axis=0)
+        if bg_type=='nod':
+            # The classic nod subtraction for low-background regions (most typical disk observations)
+
+            cubes = []
+            for bg_dither in dithers:
+                #We can exclude the dither we are using from the bg estimation
+                if bg_dither['file'] != dither['file']:
+                    cubes.append(fits.getdata(bg_dither['file']))
+            bg_all = np.stack(cubes)
+            bg_cube = np.nanmedian(bg_all, axis=0)
+      
+        elif bg_type=='annulus':
+
+            # Use an annulus to estimate the background level. Does not try to nod subtract. 
+            # This is appropriate for high-background regions with a lot of spatial structure. 
+            # Will not work well for multiple sources. 
+
+            cube = fits.getdata(dither['file'])
+            hdr  = fits.getheader(dither['file'],1)
+            nw = cube.shape[0]
+
+            # Make this a little bigger than the largest aperture size used for point sources. 
+            ann_fac = 1.6 # inner radius of annulus in units of the diffraction limit
+            
+            # Standard wavelength scale
+            wave = (np.arange(nw))*hdr['CDELT3']+hdr['CRVAL3']
+            bg_spec_tot = np.nanmedian(cube,axis=(1,2))
+
+            if self.source_cen:
+                # We must know where the source is - we cannot trust an auto centroid in complex, high background regions. 
+                wcs = WCS(hdr)
+                pix = wcs.wcs_world2pix(self.source_cen[0],self.source_cen[1],3,0)
+                cen = (pix[0],pix[1])
+            else:
+                print('The annulus background option only works with forced photometry with a user-designated source position')
+                breakpoint()
+
+            bg_spec_ann = np.zeros(nw)
+
+            # We use the difference between a long and short wave plane to estimate the 2D structure of the background. 
+            # Not perfect, but a lot better than a flat background. The wavelength reference is how many planes from the extreme ends of the cube. 
+            wave_ref = 15
+
+            # How close to the source do we dare to get before using a flat background. 
+            aper_radius = self.difflimit(np.max(wave),hdr['CDELT1']) * 2
+
+            # Define all necessary apertures and annuli
+            aperture = ap.CircularAperture(cen, aper_radius)
+            annulus =  ap.CircularAnnulus(cen, r_in=aper_radius, r_out=aper_radius+3)
+            short_stats_ann = ap.ApertureStats(cube[wave_ref,:,:], annulus)
+            long_stats_ann = ap.ApertureStats(cube[-wave_ref,:,:], annulus)
+
+            # Calculate the peak flux of the point source (minus the background)
+            short_stats = ap.ApertureStats(cube[wave_ref,:,:]-short_stats_ann.median, aperture)
+            long_stats = ap.ApertureStats(cube[-wave_ref,:,:]-long_stats_ann.median, aperture)
+
+            # The 2D structure of the background is image(long)/F(source,long) - image(short)/F(source, short)
+            bg_norm = cube[-wave_ref,:,:]/long_stats.max - cube[wave_ref,:,:]/short_stats.max
+            # normalizes to the annulus value of the 2D background
+            bg_norm_stats = ap.ApertureStats(bg_norm, annulus)
+
+            # Mask out the source residudals and replace by annulus median. 
+            aperture_mask = aperture.to_mask(method='center')
+            mask_data = aperture_mask.to_image(bg_norm.shape)
+            bg_norm[mask_data > 0] = bg_norm_stats.median
+
+            # Finally create the master background cube.
+            bg_cube = np.ones(cube.shape)
+            for iw in np.arange(nw):
+                ann_radius = self.difflimit(wave[iw],hdr['CDELT1']) * ann_fac
+                annulus = ap.CircularAnnulus(cen, r_in=ann_radius, r_out=ann_radius+3)
+                bg_stats = ap.ApertureStats(cube[iw,:,:], annulus)
+                bg_spec_ann[iw] = bg_stats.median
+                
+                bg_norm_stats = ap.ApertureStats(bg_norm, annulus)
+                bg_cube[iw,:,:] = bg_norm * bg_stats.median/bg_norm_stats.median 
+
+        elif bg_type=='fit':
+            # Experimental algorithm where the background is estimated by a fit to the source and a background plane. 
+            cube = fits.getdata(dither['file'])
+            hdr  = fits.getheader(dither['file'],1)
+            cube[np.where(~np.isfinite(cube))] = np.nanmedian(cube)
+            bg_spec_tot = np.nanmedian(cube,axis=(1,2))
+
+            nw = cube.shape[0]
+            nx = cube.shape[2]
+            ny = cube.shape[1]
+            if self.source_cen:
+                wcs = WCS(hdr)
+                pix = wcs.wcs_world2pix(self.source_cen[0],self.source_cen[1],3,0)
+                cen = (np.round(pix[0]).astype(int),np.round(pix[1]).astype(int))
+            else:
+                print('The fit background option only works with forced photometry with a user-designated source position')
+                breakpoint()
+
+            boxsize = 5
+
+            yy, xx = np.mgrid[:boxsize*2, :boxsize*2]
+
+            bg_spec_fit = np.zeros(nw)
+            x_fit = np.zeros(nw)
+            y_fit = np.zeros(nw)
+            s_fit = np.zeros(nw)
+            amp_fit = np.zeros(nw)
+
+            for iw in np.arange(nw):
+                diff_s = 3 
+                edge_b = np.max([0,cen[1]-boxsize])
+                edge_t = np.min([ny,cen[1]+boxsize])
+                edge_l = np.max([0,cen[0]-boxsize])
+                edge_r = np.min([nx,cen[0]+boxsize])
+
+                cutout = cube[iw,edge_b:edge_t,edge_l:edge_r]
+                yy, xx = np.mgrid[edge_b:edge_t, edge_l:edge_r]
+
+                #g_init = models.Gaussian2D(amplitude=np.nanmax(cutout),x_stddev=diff_s,y_stddev=diff_s,x_mean=boxsize,y_mean=boxsize,
+                #                           fixed={'theta':True})
+                a_init = models.AiryDisk2D(amplitude=np.nanmax(cutout),radius=diff_s,x_0=boxsize,y_0=boxsize)
+                c_init = models.Const2D(amplitude=np.nanmedian(cutout))
+                fitter = fitting.LMLSQFitter()
+                fitted = fitter(a_init+c_init,xx,yy,cutout)
+
+                bg_spec_fit[iw] = fitted.amplitude_1.value
+                x_fit[iw] = fitted.x_0_0.value
+                y_fit[iw] = fitted.y_0_0.value
+                s_fit[iw] = fitted.radius_0.value
+                amp_fit[iw] = fitted.amplitude_0.value
+
+            # Scaling full background spectrum to the fit level
+            bg_scl = np.nanmedian(bg_spec_fit/bg_spec_tot)
+            bg_cube = np.ones(cube.shape) * bg_spec_tot[:,np.newaxis,np.newaxis] * bg_scl
+
+
+        elif bg_type=='median':
+            # Just the median, please
+            bg_spec = np.nanmedian(cube,axis=(1,2))
+            bg_cube = np.ones(cube.shape) * bg_spec[:,np.newaxis,np.newaxis]
+        else:
+            print("Unknown background type", bg_type)
+            breakpoint()
+            
         return bg_cube
 
     def shift_rsrf(self,wave,spec1d,rsrf,maxlag = 19):

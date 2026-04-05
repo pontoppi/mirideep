@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="mirideep",
-    version="9.1",
+    version="9.4",
     author="Klaus Pontoppidan",
     author_email="kpontoppi@gmail.com",
     description="A package to calibrate high signal-to-noise MIRI MRS data",
