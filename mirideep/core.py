@@ -1,20 +1,24 @@
 import pickle
 import os
 import warnings
+import copy
 
 import numpy as np
 from scipy.signal import savgol_filter,correlate,medfilt,find_peaks
+from scipy.stats import norm
+from scipy.ndimage import median_filter
+
 import matplotlib.pylab as plt
 from matplotlib.patches import Circle
-import copy
 
 from astropy.modeling.models import BlackBody
-from astropy.convolution import convolve, Gaussian1DKernel
+from astropy.convolution import convolve, convolve_fft, Gaussian1DKernel, Gaussian2DKernel
+from astropy.convolution import interpolate_replace_nans
+from astropy.convolution import Box2DKernel
 import astropy.units as u
 from astropy.io import fits
 from astropy.modeling import models, fitting
 from astropy.stats import sigma_clipped_stats
-from astropy.convolution import convolve,Gaussian1DKernel
 from astropy.wcs import WCS
 from astropy.time import Time
 
@@ -87,6 +91,7 @@ class MiriDeepSpec():
         waves = []
         spec1d_meds = []
         spec1d_stds = []
+        bg1d_meds = []
         spec1ds_intermediate = []
         rsrfs_intermediate = []
         ratios_intermediate = []
@@ -106,15 +111,58 @@ class MiriDeepSpec():
                     rsrf_dither_indices = np.array([rsrf_dither['dither'] for rsrf_dither in self.rsrf[setting]])
 
                 spec1ds = []
-                lags = []
+                bg1ds   = []
+                lags    = []
+                #niter = 5
+                #kernel_size = 7
+                #threshold = 1.7
+                #ikernel = Box2DKernel(kernel_size)
+                #ckernel = Gaussian2DKernel(x_stddev=2)
+                
                 for dither in dithers:
-                    # which background to use? This was made because ch4 beams overlap in the 4-point extended dither pattern
+                    # which background to use? This was originally made because ch4 beams overlap in the 4-point extended dither pattern
                     bg_cube = self.bg(dither,dithers,self.bg_types['ch'+channel])
+
+                    bg_cube_cp = copy.deepcopy(bg_cube)
+                    nw = bg_cube.shape[0]
+                    bg_1d = np.zeros(nw)
+                    for ii in np.arange(nw):
+
+                        #replace nans with median
+                        plane = bg_cube_cp[ii,:,:]
+                        plane[np.where(~np.isfinite(plane))] = np.nanmedian(plane)
+
+                        ''' 
+                        for jj in np.arange(niter):
+                            
+                            #smooth = median_filter(plane,size=kernel_size, mode='mirror')
+                            smooth = convolve_fft(plane,ckernel,boundary='wrap')
+                            csubs = np.where(smooth*threshold<plane)  
+                            
+                            plane[csubs] = np.nan
+                            plane = interpolate_replace_nans(plane, ikernel)
+                            if channel=='0':
+                                breakpoint()  
+                            
+                        
+                        plane[np.where(~np.isfinite(plane))] = np.nanmedian(plane)
+                        '''
+
+                        #first half of values
+                        mu, std = norm.fit(plane[plane<np.nanmedian(plane)])
+                        #except:
+                        #    mu = np.nanmedian(plane)
+                        bg_1d[ii] = mu
+                        
+                        #mean, median, std = sigma_clipped_stats(plane, sigma=3.0)
+                        
+                    #breakpoint()
 
                     wave,spec1d,cen = self.extract(dither['file'],plot_centroid=self.plot_centroid,bg=bg_cube,rr=self.rrs['ch'+channel])
                     dither['wave'] = wave
                     dither['spec1d'] = spec1d
                     dither['cen'] = cen
+                    dither['bg'] = bg_1d
 
                     rsrf_dither_index = np.where(rsrf_dither_indices == dither['dither'])
                     # If the rsrf is missing dithers, set to the first one
@@ -179,25 +227,34 @@ class MiriDeepSpec():
                     settings_intermediate.append(setting)
 
                     spec1ds.append(spec1d_defringe)
+                    bg1ds.append(dither['bg'])
 
                 #renormalize to median so that the sigma clip rejection works better
                 #Missing data should not fail, just be left out
                 if len(spec1ds)>0:
                     med_all = np.nanmedian(np.stack(spec1ds).flatten())
+                    bg_all = np.nanmedian(np.stack(bg1ds).flatten())
                     for ii,spec1d in enumerate(spec1ds):
                         spec1ds[ii] *= med_all/np.nanmedian(spec1d)
+                        bg1ds[ii] *= bg_all/np.nanmedian(bg1ds[ii])
 
                     spec1ds = np.stack(spec1ds)
+                    bg1ds = np.stack(bg1ds)
+
                     #spec1d_med = np.nanmedian(spec1ds,axis=0)
                     #stats = sigma_clipped_stats(spec1ds,axis=0,maxiters=5,sigma=2)
+                    
                     spec1d_med = sigma_clipped_stats(spec1ds,axis=0,maxiters=3,sigma=2.,grow=False)[0]
-                    spec1d_std = sigma_clipped_stats(spec1ds,axis=0,maxiters=1,sigma=5)[2]/2. #we could divide by 2 because we have 4 dithers.
-
+                    spec1d_std = sigma_clipped_stats(spec1ds,axis=0,maxiters=1,sigma=5)[2]/2. #we divide by 2 because we have 4 dithers.
+                    bg1d_med   = sigma_clipped_stats(bg1ds,axis=0,maxiters=3,sigma=2.,grow=False)[0]
+                   
                     waves.append(wave)
                     spec1d_meds.append(spec1d_med)
                     spec1d_stds.append(spec1d_std)
+                    bg1d_meds.append(bg1d_med)
 
-        spec1d_meds = self.scale(waves,spec1d_meds)
+        spec1d_meds = self.scale(waves,spec1d_meds,silent=False)
+        bg1d_meds = self.scale(waves,bg1d_meds)
 
         # Cut the low resolution end of overlapping segments
         for ii in np.arange(len(waves)-1):
@@ -205,22 +262,24 @@ class MiriDeepSpec():
             waves[ii+1] = waves[ii+1][ssubs]
             spec1d_meds[ii+1] = spec1d_meds[ii+1][ssubs]
             spec1d_stds[ii+1] = spec1d_stds[ii+1][ssubs]
+            bg1d_meds[ii+1] = bg1d_meds[ii+1][ssubs]
 
 
         waves_flat = np.concatenate(waves)
         spec1d_flat = np.concatenate(spec1d_meds)
         spec1d_stds_flat = np.concatenate(spec1d_stds)
+        bg1d_flat = np.concatenate(bg1d_meds)
         ssubs = np.argsort(waves_flat)
         self.wave_all = waves_flat[ssubs]
         self.flux_all = spec1d_flat[ssubs]
         self.std_all = medfilt(spec1d_stds_flat[ssubs],31)
+        self.bg_all = bg1d_flat[ssubs]
 
         if self.save_intermediate:
             with open(self.source+'_intermediates_v'+str(__version__)+'.npz', "wb") as pickleFile:
                 pickle.dump({'waves':waves_intermediate,'spec1ds':spec1ds_intermediate,
                              'rsrfs':rsrfs_intermediate,'ratios':ratios_intermediate,'cens':cens_intermediate, 'settings':settings_intermediate}, pickleFile)
-
-        self.writespec(self.wave_all,self.flux_all,self.std_all,outname=self.source + '_1d_v' + str(__version__)+'.fits')
+        self.writespec(self.wave_all,self.flux_all,self.std_all,self.bg_all,outname=self.source + '_1d_v' + str(__version__)+'.fits')
 
     def standard_model(self,wave,standard='jena'):
         #nn = 6 # flatness of silicate feature
@@ -374,7 +433,7 @@ class MiriDeepSpec():
         
         # subtrqct the background
         cube -= bg
-        #breakpoint()
+
         if clean_nan:
             cube[~np.isfinite(cube)] = 0.0
 
@@ -475,7 +534,7 @@ class MiriDeepSpec():
     def difflimit(self,wave,pixsize):
         return 1.22*206265*wave/6.5e6 / pixsize / 3600
 
-    def scale(self,waves,spec1ds,maxscale=0.1):
+    def scale(self,waves,spec1ds,maxscale=0.1,silent=True):
 
         module = ['ch1 A','ch1 B','ch1 C','ch2 A','ch2 B','ch2 C','ch3 A','ch3 B','ch3 C','ch4 A','ch4 B','ch4 C']
         nsegs = len(waves)
@@ -489,10 +548,12 @@ class MiriDeepSpec():
                 scale = 1.0
             elif maxscale < scale < 1/maxscale:
                 spec1ds[ii] *= scale
-                print(module[ii]+': scale:',f'{(scale-1)*100:.3f}', '%')
+                if not silent:
+                    print(module[ii]+': scale:',f'{(scale-1)*100:.3f}', '%')
                 scales[ii] = scale
             else:
-                print(module[ii]+': Calculated scaling factor out of bounds. Not scaling', f'{(scale-1)*100:.3f}', '%')
+                if not silent:
+                    print(module[ii]+': Calculated scaling factor out of bounds. Not scaling', f'{(scale-1)*100:.3f}', '%')
                 scales[ii] = 1
             
         #Renormalize scale to avoid increasing uncertainty toward longer wavelengths
@@ -552,22 +613,24 @@ class MiriDeepSpec():
             # We use the difference between a long and short wave plane to estimate the 2D structure of the background. 
             # Not perfect, but a lot better than a flat background. The wavelength reference is how many planes from the extreme ends of the cube. 
             wave_ref = 15
+            nplanes = 50
 
             # How close to the source do we dare to get before using a flat background. 
-            aper_radius = self.difflimit(np.max(wave),hdr['CDELT1']) * 2
+            aper_radius = self.difflimit(np.max(wave),hdr['CDELT1']) * 1.6
 
             # Define all necessary apertures and annuli
             aperture = ap.CircularAperture(cen, aper_radius)
             annulus =  ap.CircularAnnulus(cen, r_in=aper_radius, r_out=aper_radius+3)
-            short_stats_ann = ap.ApertureStats(cube[wave_ref,:,:], annulus)
-            long_stats_ann = ap.ApertureStats(cube[-wave_ref,:,:], annulus)
+            short_stats_ann = ap.ApertureStats(np.nanmedian(cube[wave_ref:wave_ref+nplanes,:,:],axis=0), annulus)
+            long_stats_ann = ap.ApertureStats(np.nanmedian(cube[-wave_ref-nplanes:-wave_ref,:,:],axis=0), annulus)
 
             # Calculate the peak flux of the point source (minus the background)
-            short_stats = ap.ApertureStats(cube[wave_ref,:,:]-short_stats_ann.median, aperture)
-            long_stats = ap.ApertureStats(cube[-wave_ref,:,:]-long_stats_ann.median, aperture)
+            short_stats = ap.ApertureStats(np.nanmedian(cube[wave_ref:wave_ref+nplanes,:,:],axis=0)-short_stats_ann.median, aperture)
+            long_stats = ap.ApertureStats(np.nanmedian(cube[-wave_ref-nplanes:-wave_ref,:,:],axis=0)-long_stats_ann.median, aperture)
 
             # The 2D structure of the background is image(long)/F(source,long) - image(short)/F(source, short)
-            bg_norm = cube[-wave_ref,:,:]/long_stats.max - cube[wave_ref,:,:]/short_stats.max
+            bg_norm = np.nanmedian(cube[-wave_ref-nplanes:-wave_ref,:,:],axis=0)/long_stats.max - np.nanmedian(cube[wave_ref:wave_ref+nplanes,:,:],axis=0)/short_stats.max
+            
             # normalizes to the annulus value of the 2D background
             bg_norm_stats = ap.ApertureStats(bg_norm, annulus)
 
@@ -726,13 +789,14 @@ class MiriDeepSpec():
 
         return lag_fit
 
-    def writespec(self,wave,fd,std,outname='spec1d.fits'):
+    def writespec(self,wave,fd,std,bg,outname='spec1d.fits'):
         c1 = fits.Column(name='wavelength', array=wave, format='F', unit='micron')
         c2 = fits.Column(name='fluxdensity', array=fd, format='F', unit='Jy')
         c3 = fits.Column(name='fluxdensity_stddev', array=std, format='F', unit='Jy')
+        c4 = fits.Column(name='background', array=bg, format='F', unit='MJy/sr')
 
         primary = fits.PrimaryHDU()
-        t       = fits.BinTableHDU.from_columns([c1, c2, c3])
+        t       = fits.BinTableHDU.from_columns([c1, c2, c3, c4])
         
         primary.header['DATE']     = (Time.now().isot, 'Time file was written by MIRIDeep')
         primary.header['COMMENT']  = 'Processed by the JDISCS MIRI MRS pipeline version '+str(__version__)
