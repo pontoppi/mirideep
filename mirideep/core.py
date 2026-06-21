@@ -28,7 +28,7 @@ from photutils import centroids
 from .utils import *
 
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-__version__ = 9.4
+__version__ = 9.5
 
 class MiriDeepSpec():
     '''
@@ -128,8 +128,9 @@ class MiriDeepSpec():
                     bg_1d = np.zeros(nw)
                     for ii in np.arange(nw):
 
-                        #replace nans with median
                         plane = bg_cube_cp[ii,:,:]
+
+                        #replace nans with median                        
                         plane[np.where(~np.isfinite(plane))] = np.nanmedian(plane)
 
                         ''' 
@@ -149,7 +150,7 @@ class MiriDeepSpec():
                         '''
 
                         #first half of values
-                        mu, std = norm.fit(plane[plane<np.nanmedian(plane)])
+                        mu, std = norm.fit(plane[(plane<np.percentile(plane, 80)) & (plane>np.percentile(plane,5))])
                         #except:
                         #    mu = np.nanmedian(plane)
                         bg_1d[ii] = mu
@@ -253,9 +254,9 @@ class MiriDeepSpec():
                     spec1d_stds.append(spec1d_std)
                     bg1d_meds.append(bg1d_med)
 
-        spec1d_meds = self.scale(waves,spec1d_meds,silent=False)
-        bg1d_meds = self.scale(waves,bg1d_meds)
-
+        bg1d_meds,self.abs_flux_error_bg = self.scale(waves,bg1d_meds)
+        spec1d_meds,self.abs_flux_error = self.scale(waves,spec1d_meds,silent=False)
+        
         # Cut the low resolution end of overlapping segments
         for ii in np.arange(len(waves)-1):
             ssubs = np.where(waves[ii+1] > np.nanmax(waves[ii]))
@@ -359,11 +360,11 @@ class MiriDeepSpec():
 
     def get_rsrf(self):
         if self.ch1_standard=='hd163466_0823':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0823_rsrf_9.1.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0823_rsrf_9.5.npz'), 'rb')
         elif self.ch1_standard=='hd163466_0723':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_9.1.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_9.5.npz'), 'rb')
         elif self.ch1_standard=='hd163466_0624':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_9.1.npz'), 'rb')
+            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_9.5.npz'), 'rb')
         elif self.ch1_standard=='hd163466_COM':
             print("This option is deprecated")
             breakpoint()
@@ -375,13 +376,13 @@ class MiriDeepSpec():
         rsrf_file_ch1.close()
 
         if self.standard=='athalia':
-            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_9.1.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_9.5.npz'), 'rb')
         elif self.standard=='athalia2':
-            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_9.1.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_9.5.npz'), 'rb')
         elif self.standard=='athalia3':
-            rsrf_file = open(os.path.join(self.local_path,'athalia3_rsrf_9.2.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'athalia3_rsrf_9.5.npz'), 'rb')
         elif self.standard=='jena2':
-            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_9.1.npz'), 'rb')
+            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_9.5.npz'), 'rb')
         elif self.standard=='jena':
             print("This option is deprecated")
             breakpoint()
@@ -564,9 +565,8 @@ class MiriDeepSpec():
             for ii in np.arange(nsegs):
                 spec1ds[ii] /= np.nanmedian(scales)
 
-
-        self.abs_flux_error = np.nanmean(np.abs(scales-1)*100)
-        return spec1ds
+        abs_flux_error = np.nanmean(np.abs(scales-1)*100)
+        return spec1ds, abs_flux_error
 
 
     def bg(self,dither,dithers,bg_type='nod'):
