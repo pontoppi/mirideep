@@ -81,6 +81,8 @@ from photutils import centroids
 from .utils import *
 
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
+# Keep FITS file truncation warnings visible - these indicate data corruption
+warnings.filterwarnings(action='default', message='File may have been truncated')
 __version__ = 9.5
 
 class MiriDeepSpec():
@@ -620,9 +622,38 @@ class MiriDeepSpec():
         cubefiles = [datafile for datafile in datafiles if '_s3d.fits' in datafile]
         exp_begins = []
         exp_ends   = []
+
+        print(f"Found {len(cubefiles)} _s3d.fits files")
+
         for cubefile in cubefiles:
             expdict = {}
-            hdr = fits.getheader(cubefile)
+            try:
+                # Check file integrity by attempting to open it
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
+                    hdr = fits.getheader(cubefile)
+
+                    # Check if truncation warning was raised
+                    for warning in w:
+                        if 'truncated' in str(warning.message).lower():
+                            print(f"\n{'='*70}")
+                            print(f"WARNING: {cubefile} appears to be truncated or corrupted!")
+                            print(f"  {warning.message}")
+                            file_size = os.path.getsize(cubefile)
+                            print(f"  Actual file size: {file_size:,} bytes ({file_size/1024/1024:.2f} MB)")
+                            print(f"  This file may need to be re-downloaded from MAST.")
+                            print(f"  Skipping this file and continuing with remaining data...")
+                            print(f"{'='*70}\n")
+                            raise ValueError(f"Truncated file: {cubefile}")
+
+            except (OSError, ValueError) as e:
+                print(f"  Skipping {cubefile}: {e}")
+                continue
+            except Exception as e:
+                print(f"  WARNING: Unexpected error reading {cubefile}: {e}")
+                print(f"  Skipping this file.")
+                continue
+
             expdict['file'] = cubefile
             expdict['channel'] = hdr['CHANNEL']
             expdict['band'] = hdr['BAND'].lower()
