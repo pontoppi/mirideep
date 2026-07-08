@@ -84,8 +84,7 @@ For extended sources with high background:
 
 ```python
 md = MiriDeepSpec(source='my_source',
-                  bg_types={'ch1':'nod', 'ch2':'nod', 
-                           'ch3':'annulus', 'ch4':'annulus'},
+                  bg_types={'ch1':'nod', 'ch2':'nod', 'ch3':'nod', 'ch4':'nod'},
                   rrs={'ch1':1.4, 'ch2':1.3, 'ch3':1.2, 'ch4':1.1})
 md.run_extract()
 ```
