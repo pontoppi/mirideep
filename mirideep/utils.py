@@ -1,3 +1,56 @@
+"""
+mirideep.utils - Utility functions for wavelength calibration
+
+This module provides wavelength correction utilities for MIRI MRS data.
+The corrections are derived from calibration observations and account for
+systematic wavelength offsets in the pipeline-processed data.
+
+Key Functions
+-------------
+fit_wavecorr() : Polynomial wavelength correction fitting
+    Fits a 3rd-degree polynomial to wavelength calibration data for a given
+    spectral module (channel + band combination). The correction accounts for
+    both instrument systematics and heliocentric velocity of the calibration source.
+
+Parameters (fit_wavecorr)
+-------------------------
+module : str
+    Spectral module identifier (e.g., 'ch1short', 'ch2medium', 'ch3long')
+    Format: 'ch{1-4}{short|medium|long}'
+plot_wavefit : bool, optional
+    Display diagnostic plot of wavelength fit (default: False)
+vhelio : float, optional
+    Heliocentric velocity of calibration source in km/s (default: 16.71 km/s for FZ Tau)
+
+Returns
+-------
+best_fit_poly : astropy.modeling.models.Polynomial1D
+    Fitted 3rd-degree polynomial model that takes wavelength as input and
+    returns the wavelength shift correction
+
+Usage Example
+-------------
+>>> from mirideep.utils import fit_wavecorr
+>>> wavecorr_model = fit_wavecorr('ch1short', plot_wavefit=False, vhelio=16.71)
+>>> corrected_wavelength = wavelength + wavecorr_model(wavelength)
+
+Notes
+-----
+- Wavelength corrections are read from 'rsrfs/wavecal_wlcorr.csv'
+- Uses 3-sigma median filtering to remove outliers before fitting
+- The correction is applied additively to the wavelength array
+- Different modules cover different wavelength ranges (see 'edges' dict in code)
+
+Data Files
+----------
+rsrfs/wavecal_wlcorr.csv : Wavelength calibration reference table
+    Columns: WL (wavelength in microns), SHIFT (wavelength offset)
+
+Author
+------
+Klaus Pontoppidan (klaus.m.pontoppidan@jpl.nasa.gov)
+"""
+
 import os
 import numpy as np
 import matplotlib.pylab as plt
@@ -5,7 +58,7 @@ from astropy.io import ascii
 from astropy.modeling import models, fitting
 from scipy.signal import medfilt
 
-cc = 299792.458
+cc = 299792.458  # Speed of light in km/s
 
 def fit_wavecorr(module,plot_wavefit=False,vhelio=16.71):
 

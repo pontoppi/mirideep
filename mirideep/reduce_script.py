@@ -1,5 +1,63 @@
+"""
+mirideep.reduce_script - JWST pipeline execution and data download
 
-#Klaus Pontoppidan, klaus.m.pontoppidan@jpl.nasa.gov
+This module provides functions to download JWST MIRI MRS observations from MAST
+and execute calibration pipeline stages 1-3. It automates the process of:
+
+- Downloading rate files (_rate.fits) or uncalibrated files (_uncal.fits) from MAST
+- Creating association files for pipeline processing
+- Running calwebb_detector1 (optional, if starting from uncal files)
+- Running calwebb_spec2 per channel to create 3D IFU cubes
+- Running calwebb_spec3 to create combined products
+
+The output _s3d.fits cubes are the input to mirideep.core.MiriDeepSpec for
+high S/N extraction.
+
+Key Functions
+-------------
+reduce() : Main pipeline execution function
+    Downloads data from MAST and runs selected pipeline stages
+
+Parameters (reduce function)
+----------------------------
+path : str
+    Working directory for data processing (default: './')
+target_short : str
+    Short name for target (used in file naming)
+target_name : str
+    Full target name as appears in MAST
+obs_id : str, optional
+    Specific observation ID to download (if None, uses target_name)
+proposal_id : str
+    JWST proposal ID (e.g., '1584')
+run_dl : bool
+    Download data from MAST (requires MAST_API_TOKEN environment variable)
+run_step1 : bool
+    Run calwebb_detector1 (detector-level processing)
+run_step2 : bool
+    Run calwebb_spec2 (spectroscopic processing, creates _s3d.fits cubes)
+run_step3 : bool
+    Run calwebb_spec3 (combined products)
+
+Usage Example
+-------------
+>>> from mirideep.reduce_script import reduce
+>>> import os
+>>> os.environ['MAST_API_TOKEN'] = 'your_token_here'
+>>> reduce(target_short='mylup', target_name='MY-LUP', proposal_id='1584',
+...        run_dl=True, run_step1=False, run_step2=True, run_step3=True)
+
+Notes
+-----
+- Requires MAST_API_TOKEN environment variable for downloads
+- Stage 2 processes each channel (1-4) separately with ifualign coordinate system
+- Background exposures (BKGDTARG=True) are automatically removed
+- Intermediate pipeline products are cleaned up to save disk space
+
+Author
+------
+Klaus Pontoppidan (klaus.m.pontoppidan@jpl.nasa.gov)
+"""
 
 import os
 import subprocess
@@ -19,7 +77,7 @@ from astropy.io import fits
 
 #import logging
 
-# create logger 
+# create logger
 #logger = logging.getLogger('mirideep')
 #logger.setLevel(logging.DEBUG)
 # create file handler which logs even debug messages

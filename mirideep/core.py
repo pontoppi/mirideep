@@ -1,3 +1,56 @@
+"""
+mirideep.core - Core spectral extraction and calibration module
+
+This module contains the primary MiriDeepSpec class for extracting high signal-to-noise
+1D spectra from JWST MIRI MRS observations. It performs advanced calibration beyond the
+standard JWST pipeline including:
+
+- Aperture photometry with diffraction-limited extraction
+- Background estimation via nod subtraction or spatial annulus
+- RSRF-based fringe removal with cross-correlation optimization
+- Spectral segment stitching with flux scaling
+- Wavelength corrections
+
+Key Classes
+-----------
+MiriDeepSpec : Primary interface for spectral extraction
+    Initialized with processing parameters (background methods, aperture radii, etc.)
+    Main workflow via run_extract() method
+
+Main Methods
+------------
+run_extract() : Complete extraction pipeline
+    - Finds _s3d.fits cubes in working directory
+    - Loads pre-computed RSRFs for each channel/band
+    - For each dither: extracts spectrum, estimates background, applies RSRF correction
+    - Combines dithers with sigma-clipping
+    - Stitches spectral segments
+    - Outputs FITS table with wavelength, flux, uncertainty, background
+
+extract() : Aperture photometry on single cube
+bg() : Background estimation (nod or annulus methods)
+shift_rsrf() : Cross-correlation to optimize RSRF alignment
+scale() : Flux scaling between overlapping spectral segments
+writespec() : Write final 1D spectrum to FITS
+
+Usage Example
+-------------
+>>> from mirideep.core import MiriDeepSpec
+>>> md = MiriDeepSpec(source='mylup',
+...                   bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'nod'},
+...                   standard='jena2')
+>>> md.run_extract()
+# Outputs: mylup_1d_v9.5.fits
+
+Author
+------
+Klaus Pontoppidan (klaus.m.pontoppidan@jpl.nasa.gov)
+
+Version
+-------
+9.5 - Fixed background scale error bug, updated RSRFs
+"""
+
 import pickle
 import os
 import warnings
