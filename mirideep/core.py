@@ -1053,8 +1053,14 @@ class MiriDeepSpec():
         primary.header['CAL_VER']  = (self.last_hdr['CAL_VER'],self.last_hdr.comments['CAL_VER'])
         primary.header['CRDS_VER'] = (self.last_hdr['CRDS_VER'],self.last_hdr.comments['CRDS_VER'])
         primary.header['CRDS_CTX'] = (self.last_hdr['CRDS_CTX'],self.last_hdr.comments['CRDS_CTX'])
-        primary.header['STANDARD'] = (self.standard, 'RSRF standard')
-        primary.header['CH1_STAN'] = (self.ch1_standard, 'RSRF standard for Channel 1')
+
+        # Format calibrator lists as comma-separated strings
+        standard_str = ', '.join(self.standard) if isinstance(self.standard, list) else self.standard
+        ch1_standard_str = ', '.join(self.ch1_standard) if isinstance(self.ch1_standard, list) else self.ch1_standard
+
+        primary.header['STANDARD'] = (standard_str, 'RSRF standard(s)')
+        primary.header['CH1_STAN'] = (ch1_standard_str, 'RSRF standard(s) for Channel 1')
+        primary.header['NCALIB']   = (len(self.standard), 'Number of calibrators averaged')
 
         primary.header['ABSFLUXE'] = (f'{self.abs_flux_error:.3f}', 'Error on absolute flux (%)')
 
