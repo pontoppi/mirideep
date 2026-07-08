@@ -85,26 +85,47 @@ __version__ = 9.5
 
 class MiriDeepSpec():
     '''
-    Primary class for MIRI deep
+    Primary class for MIRI deep spectral extraction
 
     Input parameters:
     -------------------
-    plot_centroid
-    shift_optimize
-    source
-    save_intermediate
-    bg_types
-    rrs
-    standard
-    ch1_standard
-    wave_correct
-    single_shift
-    clean_badpix
-    mask_ratio
-    source_cen
+    plot_centroid : bool
+        Display centroid diagnostic plots
+    shift_optimize : bool
+        Optimize RSRF shift via cross-correlation
+    source : str
+        Source name for output files
+    save_intermediate : bool
+        Save intermediate products
+    bg_types : dict
+        Background method per channel {'ch1':'nod', 'ch2':'nod', ...}
+    rrs : dict
+        Aperture radii in diffraction limit units {'ch1':1.4, 'ch2':1.3, ...}
+    standard : str or list of str
+        Calibration source(s) for channels 2-4. If list, extracts with each and averages.
+    ch1_standard : str or list of str
+        Calibration source(s) for channel 1. If list, extracts with each and averages.
+    wave_correct : bool
+        Apply wavelength corrections
+    single_shift : bool
+        Use median shift for all dithers
+    mask_ratio : float
+        Ratio threshold for masking bad pixels
+    source_cen : False or tuple
+        (RA, Dec) for forced photometry, or False for auto-centroid
+    scale_to_segment : False or int
+        Renormalize scales to specific segment index
 
     Outputs:
     --------
+    wave_all : array
+        Wavelength array (microns)
+    flux_all : array
+        Flux density array (Jy)
+    std_all : array
+        Flux uncertainty array (Jy)
+    bg_all : array
+        Background array (MJy/sr)
 
     '''
 
@@ -159,6 +180,18 @@ class MiriDeepSpec():
             if not isinstance(scale_to_segment, int) or scale_to_segment < 0:
                 raise ValueError("scale_to_segment must be False or a non-negative integer segment index")
 
+        # Convert standard and ch1_standard to lists if they aren't already
+        if isinstance(standard, str):
+            standard = [standard]
+        if isinstance(ch1_standard, str):
+            ch1_standard = [ch1_standard]
+
+        # Validate standard and ch1_standard are lists
+        if not isinstance(standard, list):
+            raise TypeError("standard must be a string or list of strings")
+        if not isinstance(ch1_standard, list):
+            raise TypeError("ch1_standard must be a string or list of strings")
+
         self.local_path = os.path.join(os.path.dirname(__file__), 'rsrfs')
         self.standard = standard
         self.ch1_standard = ch1_standard
@@ -182,9 +215,61 @@ class MiriDeepSpec():
         self.bg_types = bg_types
 
     def run_extract(self):
+        """
+        Main extraction pipeline. If multiple calibrators are specified, extracts
+        with each calibrator and averages the resulting spectra.
+        """
         self.find_cubes()
         self.get_rsrf()
 
+        # Determine how many calibrator combinations we have
+        n_standards = len(self.standard)
+        n_ch1_standards = len(self.ch1_standard)
+        n_calibrators = max(n_standards, n_ch1_standards)
+
+        # If only one calibrator, use the original single extraction
+        if n_calibrators == 1:
+            self._extract_single(self.standard[0], self.ch1_standard[0])
+        else:
+            # Multiple calibrators - extract with each and average
+            print(f"Extracting with {n_calibrators} calibrator combinations...")
+            all_results = []
+
+            for i in range(n_calibrators):
+                # Use modulo to handle mismatched list lengths
+                std = self.standard[i % n_standards]
+                ch1_std = self.ch1_standard[i % n_ch1_standards]
+
+                print(f"  Calibrator {i+1}/{n_calibrators}: standard='{std}', ch1_standard='{ch1_std}'")
+                result = self._extract_single(std, ch1_std, return_results=True)
+                all_results.append(result)
+
+            # Average the results
+            print("Averaging spectra from all calibrators...")
+            self._average_results(all_results)
+
+            # Write final averaged spectrum
+            self.writespec(self.wave_all, self.flux_all, self.std_all, self.bg_all,
+                          outname=self.source + '_1d_v' + str(__version__) + '.fits')
+
+    def _extract_single(self, standard, ch1_standard, return_results=False):
+        """
+        Extract spectrum using a single calibrator combination.
+
+        Parameters
+        ----------
+        standard : str
+            Calibration source for channels 2-4
+        ch1_standard : str
+            Calibration source for channel 1
+        return_results : bool
+            If True, return the extracted spectrum arrays instead of storing them
+
+        Returns
+        -------
+        dict or None
+            If return_results is True, returns dict with wave_all, flux_all, std_all, bg_all
+        """
         settings = {}
         waves = []
         spec1d_meds = []
@@ -266,11 +351,11 @@ class MiriDeepSpec():
                         rsrf_dither_index = np.where(rsrf_dither_indices == 1)
 
                     if (dither['channel'] in ['1']) and (dither['band'] in ['short','medium','long']):
-                        model = self.standard_model(wave,standard=self.ch1_standard)
+                        model = self.standard_model(wave,standard=ch1_standard)
                         dither_rsrf = self.rsrf_ch1[setting][rsrf_dither_index[0][0]]['rsrf']
                         cen_rsrf = self.rsrf_ch1[setting][rsrf_dither_index[0][0]]['cen']
                     else:
-                        model = self.standard_model(wave,standard=self.standard)
+                        model = self.standard_model(wave,standard=standard)
                         dither_rsrf = self.rsrf[setting][rsrf_dither_index[0][0]]['rsrf']
                         cen_rsrf = self.rsrf[setting][rsrf_dither_index[0][0]]['cen']
 
@@ -343,16 +428,57 @@ class MiriDeepSpec():
         spec1d_stds_flat = np.concatenate(spec1d_stds)
         bg1d_flat = np.concatenate(bg1d_meds)
         ssubs = np.argsort(waves_flat)
-        self.wave_all = waves_flat[ssubs]
-        self.flux_all = spec1d_flat[ssubs]
-        self.std_all = medfilt(spec1d_stds_flat[ssubs],31)
-        self.bg_all = bg1d_flat[ssubs]
+        wave_all = waves_flat[ssubs]
+        flux_all = spec1d_flat[ssubs]
+        std_all = medfilt(spec1d_stds_flat[ssubs],31)
+        bg_all = bg1d_flat[ssubs]
 
-        if self.save_intermediate:
-            with open(self.source+'_intermediates_v'+str(__version__)+'.npz', "wb") as pickleFile:
-                pickle.dump({'waves':waves_intermediate,'spec1ds':spec1ds_intermediate,
-                             'rsrfs':rsrfs_intermediate,'ratios':ratios_intermediate,'cens':cens_intermediate, 'settings':settings_intermediate}, pickleFile)
-        self.writespec(self.wave_all,self.flux_all,self.std_all,self.bg_all,outname=self.source + '_1d_v' + str(__version__)+'.fits')
+        if return_results:
+            # Return results for averaging
+            return {
+                'wave_all': wave_all,
+                'flux_all': flux_all,
+                'std_all': std_all,
+                'bg_all': bg_all
+            }
+        else:
+            # Single calibrator case - store and write directly
+            self.wave_all = wave_all
+            self.flux_all = flux_all
+            self.std_all = std_all
+            self.bg_all = bg_all
+
+            if self.save_intermediate:
+                with open(self.source+'_intermediates_v'+str(__version__)+'.npz', "wb") as pickleFile:
+                    pickle.dump({'waves':waves_intermediate,'spec1ds':spec1ds_intermediate,
+                                 'rsrfs':rsrfs_intermediate,'ratios':ratios_intermediate,'cens':cens_intermediate, 'settings':settings_intermediate}, pickleFile)
+            self.writespec(self.wave_all,self.flux_all,self.std_all,self.bg_all,outname=self.source + '_1d_v' + str(__version__)+'.fits')
+
+    def _average_results(self, results_list):
+        """
+        Average spectra from multiple calibrator extractions.
+
+        Parameters
+        ----------
+        results_list : list of dict
+            List of extraction results, each containing wave_all, flux_all, std_all, bg_all
+        """
+        # Use the wavelength array from the first result (they should all be the same)
+        self.wave_all = results_list[0]['wave_all']
+
+        # Stack all flux arrays and average
+        flux_stack = np.stack([r['flux_all'] for r in results_list])
+        self.flux_all = np.nanmean(flux_stack, axis=0)
+
+        # For uncertainties, combine in quadrature then divide by sqrt(N)
+        std_stack = np.stack([r['std_all'] for r in results_list])
+        self.std_all = np.sqrt(np.nanmean(std_stack**2, axis=0)) / np.sqrt(len(results_list))
+
+        # Average backgrounds
+        bg_stack = np.stack([r['bg_all'] for r in results_list])
+        self.bg_all = np.nanmean(bg_stack, axis=0)
+
+        print(f"Averaged {len(results_list)} spectra:")
 
     def standard_model(self,wave,standard='jena'):
         #nn = 6 # flatness of silicate feature

@@ -87,8 +87,8 @@ RSRFs are pre-computed from calibration star observations and stored as .npz fil
 **MiriDeepSpec initialization:**
 - `bg_types`: Dict specifying background method per channel (e.g., `{'ch1':'nod','ch2':'nod','ch3':'annulus','ch4':'annulus'}`)
 - `rrs`: Dict of aperture radii in units of diffraction limit (default 1.4)
-- `standard`: Calibration source for ch2-4 (default 'jena2')
-- `ch1_standard`: Calibration source for ch1 (default 'hd163466_COM')
+- `standard`: Calibration source for ch2-4 (default 'jena2'). Can be a string or list of strings for multiple calibrators
+- `ch1_standard`: Calibration source for ch1 (default 'hd163466_COM'). Can be a string or list of strings for multiple calibrators
 - `wave_correct`: Apply wavelength corrections (default True)
 - `shift_optimize`: Optimize RSRF shift via cross-correlation (default True)
 - `single_shift`: Use median shift for all dithers vs individual shifts (default True)
@@ -96,6 +96,15 @@ RSRFs are pre-computed from calibration star observations and stored as .npz fil
 - `centroid_type`: Method for centroiding ('1dg' for 1D Gaussian)
 - `source_cen`: Use source position instead of auto-centroiding (provide (x,y) tuple)
 - `scale_to_segment`: Renormalize scales to a specific segment index (default False)
+
+**Multiple Calibrators:**
+When `standard` and/or `ch1_standard` are provided as lists, `run_extract()` will:
+1. Extract the spectrum using each calibrator independently
+2. Average the resulting flux arrays
+3. Combine uncertainties in quadrature divided by sqrt(N)
+4. Average the background estimates
+
+This reduces systematic uncertainties from calibrator choice.
 
 ## Development Notes
 
@@ -159,6 +168,14 @@ md.run_extract()
 # High-background source with annulus subtraction
 md = MiriDeepSpec(source='my_source', 
                   bg_types={'ch1':'nod','ch2':'nod','ch3':'annulus','ch4':'annulus'})
+md.run_extract()
+
+# Multiple calibrators - averages results to reduce systematic uncertainties
+md = MiriDeepSpec(source='mylup',
+                  standard=['jena2', 'athalia2'],  # Extract with both, then average
+                  ch1_standard=['hd163466_0723', 'hd163466_0823'],
+                  rrs={'ch1':1.4,'ch2':1.3,'ch3':1.2,'ch4':1.1},
+                  bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'nod'})
 md.run_extract()
 ```
 
