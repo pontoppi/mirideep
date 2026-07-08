@@ -1,3 +1,5 @@
 build/
 dist/
 mirideep.egg-info/
+__pycache__/
+*.pyc
