@@ -147,22 +147,27 @@ for f in glob.glob("*rate.fits"):
         print(f"Warning: Could not remove {f}: {e}")
 ```
 
-### 8. Potential KeyError When Accessing FITS Headers (core.py:106, reduce_script.py:106)
+### 8. Potential KeyError When Accessing FITS Headers (reduce_script.py:114) ✅ RESOLVED
 
-**Location:** reduce_script.py:106
+**Location:** reduce_script.py:114
 
-**Issue:** Accessing `hdr['BKGDTARG']` without checking if key exists will raise `KeyError` for malformed FITS files.
+**Status:** Fixed to use safe header access with `.get()` method
 
+**Issue:** Accessing `hdr['BKGDTARG']` without checking if key exists will raise `KeyError` for malformed or non-standard FITS files.
+
+**Implementation:**
 ```python
+# Before:
 if hdr['BKGDTARG']:
     os.remove(file)
-```
 
-**Recommendation:**
-```python
+# After:
+# Use .get() to safely check for BKGDTARG key (may not exist in all FITS files)
 if hdr.get('BKGDTARG', False):
     os.remove(file)
 ```
+
+This ensures that if the BKGDTARG key is missing from the header, the code assumes it's not a background exposure (default value `False`) rather than crashing with a KeyError. This is more robust when processing FITS files from various sources or pipeline versions.
 
 ## Minor Issues
 

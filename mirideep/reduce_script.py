@@ -111,7 +111,8 @@ def reduce(path='./', target_short='wsb52', target_name='WSB-52', obs_id=None, p
             for file in files:
                 if '_rate.fits' in file:
                     hdr = fits.getheader(file)
-                    if hdr['BKGDTARG']:
+                    # Use .get() to safely check for BKGDTARG key (may not exist in all FITS files)
+                    if hdr.get('BKGDTARG', False):
                         os.remove(file)
                         print('Removing background exposure: ', file)
 
