@@ -615,7 +615,7 @@ class MiriDeepSpec():
         for ii in np.arange(nsegs-1)+1:
             osubs_left = np.where(waves[ii-1]>np.min(waves[ii]))
             osubs_right = np.where(waves[ii]<np.max(waves[ii-1]))
-            scale = np.nanmedian(spec1ds[ii-1][osubs_left])/np.median(spec1ds[ii][osubs_right])
+            scale = np.nanmedian(spec1ds[ii-1][osubs_left])/np.nanmedian(spec1ds[ii][osubs_right])
             
             if ~np.isfinite(scale):
                 scale = 1.0

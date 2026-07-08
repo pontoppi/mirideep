@@ -95,20 +95,24 @@ else:
     raise ValueError('The annulus background option requires source_cen parameter to be set')
 ```
 
-### 5. Inconsistent Use of `np.median` vs `np.nanmedian` (core.py:573)
+### 5. Inconsistent Use of `np.median` vs `np.nanmedian` (core.py:618) ✅ RESOLVED
 
-**Location:** core.py:573
+**Location:** core.py:618 (in `scale()` method)
 
-**Issue:** Mixing `np.nanmedian` and `np.median` in same calculation could cause issues if NaNs are present.
+**Status:** Fixed to use `np.nanmedian` consistently
 
+**Issue:** Mixing `np.nanmedian` and `np.median` in same calculation could cause issues if NaNs are present in the overlapping spectral regions.
+
+**Implementation:**
 ```python
+# Before:
 scale = np.nanmedian(spec1ds[ii-1][osubs_left])/np.median(spec1ds[ii][osubs_right])
-```
 
-**Recommendation:** Use `np.nanmedian` consistently:
-```python
+# After:
 scale = np.nanmedian(spec1ds[ii-1][osubs_left])/np.nanmedian(spec1ds[ii][osubs_right])
 ```
+
+This ensures consistent NaN handling in both the numerator and denominator when calculating flux scaling factors between overlapping spectral segments.
 
 ### 6. Hardcoded `time.sleep(10)` (reduce_script.py:112)
 
