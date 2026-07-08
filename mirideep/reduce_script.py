@@ -75,18 +75,6 @@ from astroquery.mast import Observations
 from astroquery.mast.missions import MastMissions
 from astropy.io import fits
 
-#import logging
-
-# create logger
-#logger = logging.getLogger('mirideep')
-#logger.setLevel(logging.DEBUG)
-# create file handler which logs even debug messages
-#fh = logging.FileHandler('mirideep.log', 'a')
-#fh.setFormatter(logging.Formatter('%(asctime)s :: %(levelname)s :: %(message)s'))
-
-#fh.setLevel(logging.DEBUG)
-#logger.addHandler(fh)
-
 
 def reduce(path='./', target_short='wsb52', target_name='WSB-52', obs_id=None, proposal_id='1584',
            run_dl=True, run_step1=False, run_step2=True, run_step3=True):

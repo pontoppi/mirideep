@@ -166,11 +166,6 @@ class MiriDeepSpec():
                 spec1ds = []
                 bg1ds   = []
                 lags    = []
-                #niter = 5
-                #kernel_size = 7
-                #threshold = 1.7
-                #ikernel = Box2DKernel(kernel_size)
-                #ckernel = Gaussian2DKernel(x_stddev=2)
                 
                 for dither in dithers:
                     # which background to use? This was originally made because ch4 beams overlap in the 4-point extended dither pattern
@@ -186,32 +181,11 @@ class MiriDeepSpec():
                         #replace nans with median                        
                         plane[np.where(~np.isfinite(plane))] = np.nanmedian(plane)
 
-                        ''' 
-                        for jj in np.arange(niter):
-                            
-                            #smooth = median_filter(plane,size=kernel_size, mode='mirror')
-                            smooth = convolve_fft(plane,ckernel,boundary='wrap')
-                            csubs = np.where(smooth*threshold<plane)  
-                            
-                            plane[csubs] = np.nan
-                            plane = interpolate_replace_nans(plane, ikernel)
-                            if channel=='0':
-                                breakpoint()  
-                            
-                        
-                        plane[np.where(~np.isfinite(plane))] = np.nanmedian(plane)
-                        '''
 
                         #first half of values
                         mu, std = norm.fit(plane[(plane<np.percentile(plane, 80)) & (plane>np.percentile(plane,5))])
-                        #except:
-                        #    mu = np.nanmedian(plane)
                         bg_1d[ii] = mu
                         
-                        #mean, median, std = sigma_clipped_stats(plane, sigma=3.0)
-                        
-                    #breakpoint()
-
                     wave,spec1d,cen = self.extract(dither['file'],plot_centroid=self.plot_centroid,bg=bg_cube,rr=self.rrs['ch'+channel])
                     dither['wave'] = wave
                     dither['spec1d'] = spec1d
