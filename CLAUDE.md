@@ -47,6 +47,10 @@ The package includes calibration data (RSRFs - Relative Spectral Response Functi
 - Multiple versions (5.0, 6.0, 6.1, 6.3, 7.1, 8.0, 8.1, 8.2, 8.3, 8.4, 9.5)
 - CSV/DAT files for wavelength calibration and emissivity tables
 
+**mirideep/examples/**
+- `run.py`: Example extraction script for mylup observation (program 1584)
+- `reduce_all.py`: Batch processing script that traverses multiple observation folders and extracts spectra from each
+
 ### Data Flow
 
 1. Raw JWST data → JWST pipeline (stages 1-3) → _s3d.fits cubes
@@ -121,29 +125,50 @@ Key external packages:
 
 ### Common Workflows
 
-**Process new observations:**
+The typical workflow is a two-step process: (1) download and reduce data through JWST pipeline, (2) extract high S/N spectrum with mirideep.
+
+**Step 1: Download and reduce data (Level 2 & 3 processing)**
+
+Uses `reduce_script.py` to download from MAST and run JWST pipeline stages 2-3:
+
 ```python
 from mirideep.reduce_script import reduce
 
-# Download and run pipeline
-reduce(path='./', target_short='source_name', target_name='Source Name', 
-       proposal_id='XXXX', run_dl=True, run_step1=False, run_step2=True, run_step3=True)
+# Download and run pipeline (example: program 1584, observation mylup)
+reduce(path='./', target_short='mylup', target_name='MY-LUP', 
+       proposal_id='1584', run_dl=True, run_step1=False, run_step2=True, run_step3=True)
 ```
 
-**Extract high S/N spectrum:**
+This produces `*_s3d.fits` cubes in the current directory.
+
+**Step 2: Extract spectrum with mirideep**
+
+Run from within the observation folder (e.g., `data_mylup/`) containing the `*_s3d.fits` files:
+
 ```python
 from mirideep.core import MiriDeepSpec
 
-# Standard extraction
-md = MiriDeepSpec(source='my_source')
+# Standard extraction (example from mirideep/examples/run.py)
+md = MiriDeepSpec(source='mylup', save_intermediate=True, standard='jena2',
+                  rrs={'ch1':1.4,'ch2':1.3,'ch3':1.2,'ch4':1.1},
+                  bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'nod'},
+                  wave_correct=True, ch1_standard='hd163466_0723')
 md.run_extract()
-# Output: my_source_1d_v9.5.fits
+# Output: mylup_1d_v9.5.fits
 
 # High-background source with annulus subtraction
 md = MiriDeepSpec(source='my_source', 
                   bg_types={'ch1':'nod','ch2':'nod','ch3':'annulus','ch4':'annulus'})
 md.run_extract()
 ```
+
+**Batch processing multiple observations**
+
+See `mirideep/examples/reduce_all.py` for a convenience script that traverses multiple observation folders and extracts spectra from each one. The script:
+1. Iterates through a list of observations from program 1584
+2. Changes to each data directory (e.g., `data_mylup/`, `data_as209/`)
+3. Runs `reduce()` for pipeline processing
+4. Logs success/failure for each target
 
 **Create custom RSRF from calibrator:**
 ```python
