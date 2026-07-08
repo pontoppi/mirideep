@@ -1,0 +1,168 @@
+# mirideep
+
+A Python package for calibrating high signal-to-noise JWST MIRI MRS (Mid-Infrared Medium Resolution Spectrometer) data. The package performs advanced spectral extraction, fringe removal, and background subtraction beyond the standard JWST pipeline processing.
+
+## Features
+
+- **Advanced Background Subtraction**: Support for both nod subtraction and annulus-based methods for high-background extended sources
+- **Fringe Removal**: RSRF-based defringing using pre-computed calibration data with cross-correlation optimization
+- **Multi-Channel Processing**: Handles all MIRI MRS channels (1-4) and bands (short, medium, long)
+- **Spectral Stitching**: Automated scaling and stitching of overlapping spectral segments
+- **Pipeline Integration**: Direct integration with JWST calibration pipeline stages 2-3
+- **Batch Processing**: Convenient scripts for processing multiple observations
+
+## Installation
+
+### Requirements
+
+- Python 3.x
+- JWST pipeline (`jwst` package)
+- Astropy
+- Photutils
+- Scipy
+- Numpy
+- Matplotlib
+- Astroquery (for MAST data downloads)
+
+### Install
+
+Clone the repository and install in development mode:
+
+```bash
+git clone https://github.com/yourusername/mirideep.git
+cd mirideep
+pip install -e .
+```
+
+## Quick Start
+
+### 1. Download and Reduce Data (Pipeline Stages 2-3)
+
+First, set your MAST API token:
+```bash
+export MAST_API_TOKEN="your_token_here"
+```
+
+Then download and process observations:
+
+```python
+from mirideep.reduce_script import reduce
+
+# Download data from MAST and run JWST pipeline
+reduce(path='./', 
+       target_short='mylup', 
+       target_name='MY-LUP', 
+       proposal_id='1584',
+       run_dl=True,      # Download from MAST
+       run_step1=False,  # Skip detector1 (use rate files)
+       run_step2=True,   # Run spec2 pipeline
+       run_step3=True)   # Run spec3 pipeline
+```
+
+This produces `*_s3d.fits` spectral cubes.
+
+### 2. Extract High S/N Spectrum
+
+Run from the directory containing the `*_s3d.fits` files:
+
+```python
+from mirideep.core import MiriDeepSpec
+
+# Standard extraction with nod subtraction
+md = MiriDeepSpec(source='mylup',
+                  standard='jena2',
+                  ch1_standard='hd163466_0723',
+                  wave_correct=True)
+md.run_extract()
+```
+
+Output: `mylup_1d_v9.5.fits` - a 1D spectrum in FITS table format with columns for wavelength, flux density, uncertainty, and background.
+
+### 3. High-Background Sources
+
+For extended sources with high background:
+
+```python
+md = MiriDeepSpec(source='my_source',
+                  bg_types={'ch1':'nod', 'ch2':'nod', 
+                           'ch3':'annulus', 'ch4':'annulus'},
+                  rrs={'ch1':1.4, 'ch2':1.3, 'ch3':1.2, 'ch4':1.1})
+md.run_extract()
+```
+
+## Examples
+
+The `mirideep/examples/` directory contains practical examples:
+
+- **`reduce_all.py`**: Downloads and reduces observations from program 1584 (mylup example)
+- **`data_mylup/run.py`**: Extraction script for the mylup observation
+- **`run_all.py`**: Batch processing script that traverses multiple data directories
+
+To run the example:
+```bash
+cd mirideep/examples
+python reduce_all.py  # Download and reduce
+cd data_mylup
+python run.py         # Extract spectrum
+```
+
+## Key Parameters
+
+### Background Estimation Methods
+
+- `'nod'`: Classic nod subtraction using median of other dithers (default, best for low-background point sources)
+- `'annulus'`: Spatial annulus around source (for high-background extended sources)
+
+### Aperture Radii
+
+- `rrs`: Dictionary of aperture radii per channel in units of diffraction limit (default: 1.4 for all channels)
+
+### Calibration Sources
+
+- `standard`: Calibration source for channels 2-4 (default: 'jena2')
+- `ch1_standard`: Calibration source for channel 1 (default: 'hd163466_COM')
+
+See [CLAUDE.md](CLAUDE.md) for complete parameter documentation and architecture details.
+
+## Output Format
+
+The extracted 1D spectrum is saved as a FITS binary table with columns:
+
+- `wavelength` (microns)
+- `fluxdensity` (Jy)
+- `fluxdensity_stddev` (Jy)
+- `background` (MJy/sr)
+
+## Version History
+
+- **v9.5** (Current): Fixed bug recording background scale error as spectral scale error; updated RSRFs
+- **v9.1-9.4**: Extensive work on high-background subtraction and annulus-based estimation
+- **v8.x**: Updated RSRFs with new pixel replacement algorithm
+- **v7.x and earlier**: Core extraction and fringe removal pipeline
+
+## Documentation
+
+- [CLAUDE.md](CLAUDE.md) - Detailed technical documentation and architecture
+- See docstrings in `mirideep/core.py` for API reference
+
+## Contributing
+
+This package is actively developed for processing JWST MIRI MRS observations. Contributions and bug reports are welcome.
+
+## Author
+
+Klaus Pontoppidan (klaus.m.pontoppidan@jpl.nasa.gov)
+
+## License
+
+MIT License - see [setup.py](setup.py) for details
+
+## Citation
+
+If you use this package in your research, please cite:
+- Pontoppidan et al. (in prep)
+- JWST MIRI MRS calibration papers
+
+## Acknowledgments
+
+This work uses calibration data derived from JWST observations and benefits from the JWST calibration pipeline developed by STScI.
