@@ -114,6 +114,51 @@ class MiriDeepSpec():
                  wave_correct=True,single_shift=True,mask_ratio=20,centroid_type='1dg',
                  source_cen=False,scale_to_segment=False):
 
+        # Input validation
+        valid_channels = {'ch1', 'ch2', 'ch3', 'ch4'}
+        valid_bg_methods = {'nod', 'annulus', 'fit'}
+
+        # Validate bg_types
+        if not isinstance(bg_types, dict):
+            raise TypeError("bg_types must be a dictionary")
+        for channel, method in bg_types.items():
+            if channel not in valid_channels:
+                raise ValueError(f"Invalid channel '{channel}' in bg_types. Must be one of {valid_channels}")
+            if method not in valid_bg_methods:
+                raise ValueError(f"Invalid background method '{method}' for {channel}. Must be one of {valid_bg_methods}")
+
+        # Validate rrs
+        if not isinstance(rrs, dict):
+            raise TypeError("rrs must be a dictionary")
+        for channel, radius in rrs.items():
+            if channel not in valid_channels:
+                raise ValueError(f"Invalid channel '{channel}' in rrs. Must be one of {valid_channels}")
+            if not isinstance(radius, (int, float)):
+                raise TypeError(f"Aperture radius for {channel} must be a number, got {type(radius)}")
+            if radius <= 0:
+                raise ValueError(f"Aperture radius for {channel} must be positive, got {radius}")
+
+        # Validate that rrs and bg_types have matching channels
+        if set(bg_types.keys()) != set(rrs.keys()):
+            raise ValueError(f"bg_types and rrs must have matching channel keys. "
+                           f"bg_types has {set(bg_types.keys())}, rrs has {set(rrs.keys())}")
+
+        # Validate mask_ratio
+        if not isinstance(mask_ratio, (int, float)) or mask_ratio <= 0:
+            raise ValueError(f"mask_ratio must be a positive number, got {mask_ratio}")
+
+        # Validate source_cen if provided
+        if source_cen is not False:
+            if not isinstance(source_cen, (tuple, list)) or len(source_cen) != 2:
+                raise ValueError("source_cen must be False or a tuple/list of (RA, Dec)")
+            if not all(isinstance(x, (int, float)) for x in source_cen):
+                raise ValueError("source_cen coordinates must be numeric")
+
+        # Validate scale_to_segment if provided
+        if scale_to_segment is not False:
+            if not isinstance(scale_to_segment, int) or scale_to_segment < 0:
+                raise ValueError("scale_to_segment must be False or a non-negative integer segment index")
+
         self.local_path = os.path.join(os.path.dirname(__file__), 'rsrfs')
         self.standard = standard
         self.ch1_standard = ch1_standard
@@ -131,7 +176,7 @@ class MiriDeepSpec():
 
         # Dummy time values for figuring out the total observation duration
         self.exp_begin = Time('2050-01-01T00:00:00.0')
-        self.exp_end = Time('2020-01-01T00:00:00.0') 
+        self.exp_end = Time('2020-01-01T00:00:00.0')
 
         self.rrs = rrs
         self.bg_types = bg_types
