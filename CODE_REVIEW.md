@@ -56,22 +56,24 @@ else:
     print(f"Warning: No lags computed for {setting}, using lag_med=0")
 ```
 
-### 3. Missing Error Handling for MAST_API_TOKEN (reduce_script.py:87)
+### 3. Missing Error Handling for MAST_API_TOKEN (reduce_script.py:87) ✅ RESOLVED
 
 **Location:** reduce_script.py:87
 
-**Issue:** If `MAST_API_TOKEN` is not set, the code will raise `KeyError` with unclear error message.
+**Status:** Implemented comprehensive error handling with helpful instructions
 
-```python
-my_session = Observations.login(token=os.environ['MAST_API_TOKEN'])
-```
-
-**Recommendation:**
+**Implementation:**
 ```python
 if 'MAST_API_TOKEN' not in os.environ:
-    raise ValueError("MAST_API_TOKEN environment variable must be set for downloading data")
+    raise ValueError(
+        "MAST_API_TOKEN environment variable must be set for downloading data.\n"
+        "Get your token from https://auth.mast.stsci.edu/token and set it with:\n"
+        "  export MAST_API_TOKEN='your_token_here'"
+    )
 my_session = Observations.login(token=os.environ['MAST_API_TOKEN'])
 ```
+
+The error message now provides clear instructions including where to get the token and how to set it.
 
 ## Moderate Issues
 

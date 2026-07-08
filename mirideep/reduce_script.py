@@ -80,10 +80,18 @@ def reduce(path='./', target_short='wsb52', target_name='WSB-52', obs_id=None, p
            run_dl=True, run_step1=False, run_step2=True, run_step3=True):
 
     if run_dl:
+        # Check for required MAST API token
+        if 'MAST_API_TOKEN' not in os.environ:
+            raise ValueError(
+                "MAST_API_TOKEN environment variable must be set for downloading data.\n"
+                "Get your token from https://auth.mast.stsci.edu/token and set it with:\n"
+                "  export MAST_API_TOKEN='your_token_here'"
+            )
+
         import glob
         for f in glob.glob("*rate.fits"):
             os.remove(f)
-        
+
         my_session = Observations.login(token=os.environ['MAST_API_TOKEN'])
 
         if obs_id:
