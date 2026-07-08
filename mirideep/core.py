@@ -219,8 +219,8 @@ class MiriDeepSpec():
         Main extraction pipeline. If multiple calibrators are specified, extracts
         with each calibrator and averages the resulting spectra.
         """
+        # find_cubes() only needs to be called once
         self.find_cubes()
-        self.get_rsrf()
 
         # Determine how many calibrator combinations we have
         n_standards = len(self.standard)
@@ -270,6 +270,9 @@ class MiriDeepSpec():
         dict or None
             If return_results is True, returns dict with wave_all, flux_all, std_all, bg_all
         """
+        # Load RSRF for this specific calibrator combination
+        self.get_rsrf(standard=standard, ch1_standard=ch1_standard)
+
         settings = {}
         waves = []
         spec1d_meds = []
@@ -556,32 +559,47 @@ class MiriDeepSpec():
         with open(standard+'_rsrf_'+str(__version__)+'.npz', "wb") as pickleFile:
             pickle.dump(settings, pickleFile)
 
-    def get_rsrf(self):
-        if self.ch1_standard=='hd163466_0823':
+    def get_rsrf(self, standard=None, ch1_standard=None):
+        """
+        Load RSRF calibration data for given standards.
+
+        Parameters
+        ----------
+        standard : str, optional
+            Standard for channels 2-4. If None, uses self.standard[0]
+        ch1_standard : str, optional
+            Standard for channel 1. If None, uses self.ch1_standard[0]
+        """
+        if standard is None:
+            standard = self.standard[0]
+        if ch1_standard is None:
+            ch1_standard = self.ch1_standard[0]
+
+        if ch1_standard=='hd163466_0823':
             rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0823_rsrf_9.5.npz'), 'rb')
-        elif self.ch1_standard=='hd163466_0723':
+        elif ch1_standard=='hd163466_0723':
             rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_9.5.npz'), 'rb')
-        elif self.ch1_standard=='hd163466_0624':
+        elif ch1_standard=='hd163466_0624':
             rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_9.5.npz'), 'rb')
-        elif self.ch1_standard=='hd163466_COM':
+        elif ch1_standard=='hd163466_COM':
             print("This option is deprecated")
             breakpoint()
         else:
             print('Unknown channel 1 standard')
-            breakpoint()            
+            breakpoint()
 
         self.rsrf_ch1 = pickle.load(rsrf_file_ch1)
         rsrf_file_ch1.close()
 
-        if self.standard=='athalia':
+        if standard=='athalia':
             rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_9.5.npz'), 'rb')
-        elif self.standard=='athalia2':
+        elif standard=='athalia2':
             rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_9.5.npz'), 'rb')
-        elif self.standard=='athalia3':
+        elif standard=='athalia3':
             rsrf_file = open(os.path.join(self.local_path,'athalia3_rsrf_9.5.npz'), 'rb')
-        elif self.standard=='jena2':
+        elif standard=='jena2':
             rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_9.5.npz'), 'rb')
-        elif self.standard=='jena':
+        elif standard=='jena':
             print("This option is deprecated")
             breakpoint()
             #rsrf_file = open(os.path.join(self.local_path,'jena_rsrf_8.0.npz'), 'rb')
