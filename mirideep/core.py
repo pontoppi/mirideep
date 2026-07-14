@@ -63,6 +63,7 @@ from scipy.ndimage import median_filter
 
 import matplotlib.pylab as plt
 from matplotlib.patches import Circle
+from matplotlib.backends.backend_pdf import PdfPages
 
 from astropy.modeling.models import BlackBody
 from astropy.convolution import convolve, convolve_fft, Gaussian1DKernel, Gaussian2DKernel
@@ -286,6 +287,7 @@ class MiriDeepSpec():
         waves_intermediate = []
         cens_intermediate = []
         settings_intermediate = []
+        xcorr_diagnostics_intermediate = []
 
         for channel in ['1','2','3','4']:
             for band in ['short','medium','long']:
@@ -338,9 +340,15 @@ class MiriDeepSpec():
                         dither_rsrf = self.rsrf[setting][rsrf_dither_index[0][0]]['rsrf']
 
                     if self.shift_optimize:
-                        lag = self.shift_rsrf(wave,spec1d,dither_rsrf)
+                        if self.save_intermediate:
+                            lag, diagnostics = self.shift_rsrf(wave,spec1d,dither_rsrf,return_diagnostics=True)
+                            xcorr_diagnostics_intermediate.append(diagnostics)
+                        else:
+                            lag = self.shift_rsrf(wave,spec1d,dither_rsrf)
                     else:
                         lag = 0
+                        if self.save_intermediate:
+                            xcorr_diagnostics_intermediate.append(None)
 
                     lags.append(lag)
 
@@ -456,7 +464,10 @@ class MiriDeepSpec():
             if self.save_intermediate:
                 with open(self.source+'_intermediates_v'+str(__version__)+'.npz', "wb") as pickleFile:
                     pickle.dump({'waves':waves_intermediate,'spec1ds':spec1ds_intermediate,
-                                 'rsrfs':rsrfs_intermediate,'ratios':ratios_intermediate,'cens':cens_intermediate, 'settings':settings_intermediate}, pickleFile)
+                                 'rsrfs':rsrfs_intermediate,'ratios':ratios_intermediate,'cens':cens_intermediate,
+                                 'settings':settings_intermediate,'xcorr_diagnostics':xcorr_diagnostics_intermediate}, pickleFile)
+                self.plot_intermediate_spectra(waves_intermediate, spec1ds_intermediate, rsrfs_intermediate, settings_intermediate)
+                self.plot_cross_correlation(xcorr_diagnostics_intermediate, settings_intermediate)
             self.writespec(self.wave_all,self.flux_all,self.std_all,self.bg_all,outname=self.source + '_1d_v' + str(__version__)+'.fits')
 
     def _average_results(self, results_list):
@@ -475,9 +486,9 @@ class MiriDeepSpec():
         flux_stack = np.stack([r['flux_all'] for r in results_list])
         self.flux_all = np.nanmean(flux_stack, axis=0)
 
-        # For uncertainties, combine in quadrature then divide by sqrt(N)
+        # For uncertainties, it is still the mean since we expect to conservatively be dominated by the source not the standard
         std_stack = np.stack([r['std_all'] for r in results_list])
-        self.std_all = np.sqrt(np.nanmean(std_stack**2, axis=0)) / np.sqrt(len(results_list))
+        self.std_all = np.nanmean(std_stack, axis=0)
 
         # Average backgrounds
         bg_stack = np.stack([r['bg_all'] for r in results_list])
@@ -963,7 +974,7 @@ class MiriDeepSpec():
             
         return bg_cube
 
-    def shift_rsrf(self,wave,spec1d,rsrf,maxlag = 19):
+    def shift_rsrf(self,wave,spec1d,rsrf,maxlag = 19, return_diagnostics=False):
 
         spec1d_cont = savgol_filter(spec1d,int(spec1d.size/16.),2,mode='nearest')
         rsrf_cont = savgol_filter(rsrf,int(rsrf.size/16.),2,mode='nearest')
@@ -1023,7 +1034,7 @@ class MiriDeepSpec():
             ax1 = fig.add_subplot(311)
             ax2 = fig.add_subplot(312)
             ax3 = fig.add_subplot(313)
-            
+
             ax1.plot(np.arange(maxlag*2) - maxlag + 1, peakspec)
             ax1.plot(np.arange(maxlag*2) - maxlag + 1, fit(np.arange(maxlag*2)))
 
@@ -1033,6 +1044,19 @@ class MiriDeepSpec():
 
             ax3.plot((corr1+1)/(corr2_sh+1))
             plt.show()
+
+        if return_diagnostics:
+            # Return diagnostic data for plotting
+            diagnostics = {
+                'lag_fit': lag_fit,
+                'maxlag': maxlag,
+                'peakspec': peakspec,
+                'fit': fit,
+                'corr1': corr1,
+                'corr2': corr2,
+                'wave': wave
+            }
+            return lag_fit, diagnostics
 
         return lag_fit
 
@@ -1098,3 +1122,227 @@ class MiriDeepSpec():
 
         hdulist = fits.HDUList([primary,t])
         hdulist.writeto(outname,overwrite=True)
+
+    def plot_intermediate_spectra(self, waves, spec1ds, rsrfs, settings, poly_order=5, medfilt_size=21):
+        """
+        Plot spec1ds and rsrfs for each setting and dither position.
+
+        Creates separate pages (figures) for each setting (channel-band combination)
+        and saves them as pages in a single PDF file.
+        Each page has 4 rows (one per dither) in landscape orientation.
+
+        Parameters
+        ----------
+        waves : list of arrays
+            Wavelength arrays for each dither
+        spec1ds : list of arrays
+            1D spectra for each dither
+        rsrfs : list of arrays
+            RSRF arrays for each dither
+        settings : list of str
+            Setting identifiers (e.g., 'ch1_short', 'ch2_medium') for each dither
+        poly_order : int, optional
+            Order of polynomial for continuum normalization (default=5)
+        medfilt_size : int, optional
+            Box size for median filter to make polynomial fits outlier-resistant (default=21)
+        """
+        # Get unique settings in order
+        unique_settings = []
+        for s in settings:
+            if s not in unique_settings:
+                unique_settings.append(s)
+
+        # Create PDF file to hold all pages
+        outname = self.source + '_intermediate_spectra_v' + str(__version__) + '.pdf'
+
+        with PdfPages(outname) as pdf:
+            # Create a separate page for each setting
+            for setting in unique_settings:
+                # Find all indices for this setting
+                setting_indices = [i for i, s in enumerate(settings) if s == setting]
+                n_dithers = len(setting_indices)
+
+                # Calculate x-limits for this setting (95% of wavelength range)
+                # Collect all wavelengths for this setting
+                all_waves_setting = np.concatenate([waves[i] for i in setting_indices])
+                wave_min = np.percentile(all_waves_setting[np.isfinite(all_waves_setting)], 2.5)
+                wave_max = np.percentile(all_waves_setting[np.isfinite(all_waves_setting)], 97.5)
+
+                # Create figure with landscape orientation: 1 column, 4 rows
+                fig = plt.figure(figsize=(12, 10))
+
+                for dither_idx, data_idx in enumerate(setting_indices):
+                    wave = waves[data_idx]
+                    spec1d = spec1ds[data_idx]
+                    rsrf = rsrfs[data_idx]
+
+                    # Normalize spec1d by fitting and dividing by polynomial
+                    # Apply median filter to make fit outlier-resistant
+                    finite_mask_spec = np.isfinite(spec1d) & np.isfinite(wave)
+                    if np.sum(finite_mask_spec) > poly_order + 1:  # Need enough points for polynomial fit
+                        spec1d_medfilt = medfilt(spec1d, kernel_size=medfilt_size)
+                        poly_coeff_spec = np.polyfit(wave[finite_mask_spec], spec1d_medfilt[finite_mask_spec], poly_order)
+                        poly_fit_spec = np.polyval(poly_coeff_spec, wave)
+                        spec1d_norm = spec1d / poly_fit_spec
+                    else:
+                        spec1d_norm = spec1d / np.nanmedian(spec1d)
+
+                    # Normalize rsrf by fitting and dividing by polynomial
+                    # Apply median filter to make fit outlier-resistant
+                    finite_mask_rsrf = np.isfinite(rsrf) & np.isfinite(wave)
+                    if np.sum(finite_mask_rsrf) > poly_order + 1:
+                        rsrf_medfilt = medfilt(rsrf, kernel_size=medfilt_size)
+                        poly_coeff_rsrf = np.polyfit(wave[finite_mask_rsrf], rsrf_medfilt[finite_mask_rsrf], poly_order)
+                        poly_fit_rsrf = np.polyval(poly_coeff_rsrf, wave)
+                        rsrf_norm = rsrf / poly_fit_rsrf
+                    else:
+                        rsrf_norm = rsrf / np.nanmedian(rsrf)
+
+                    # Create subplot - 4 rows, 1 column
+                    ax = fig.add_subplot(4, 1, dither_idx + 1)
+
+                    # Plot normalized spec1d (solid blue line)
+                    ax.plot(wave, spec1d_norm, color='C0', alpha=0.8, linewidth=1.2,
+                           label='spec1d')
+
+                    # Plot normalized rsrf (dashed orange line)
+                    ax.plot(wave, rsrf_norm, color='C1', alpha=0.7, linewidth=1.2,
+                           linestyle='--', label='rsrf')
+
+                    # Set x-limits to show 95% of wavelength range
+                    ax.set_xlim(wave_min, wave_max)
+
+                    # Determine y-limits by rejecting 5% outliers (2.5% on each side)
+                    combined_data = np.concatenate([spec1d_norm[np.isfinite(spec1d_norm)],
+                                                    rsrf_norm[np.isfinite(rsrf_norm)]])
+                    if len(combined_data) > 0:
+                        y_min = np.percentile(combined_data, 2.5)
+                        y_max = np.percentile(combined_data, 97.5)
+                        # Add 5% margin for better visualization
+                        y_range = y_max - y_min
+                        ax.set_ylim(y_min - 0.05 * y_range, y_max + 0.05 * y_range)
+
+                    # Format subplot
+                    ax.set_ylabel('Normalized Flux', fontsize=10)
+                    ax.set_title(f'Dither {dither_idx+1}', fontsize=10, loc='left', fontweight='bold')
+                    ax.grid(True, alpha=0.3, linestyle=':')
+                    ax.legend(fontsize=9, loc='best', framealpha=0.9)
+
+                    # Only show x-label and x-tick labels on bottom panel
+                    if dither_idx == n_dithers - 1 or dither_idx == 3:
+                        ax.set_xlabel('Wavelength (μm)', fontsize=10)
+                    else:
+                        ax.set_xlabel('')
+                        ax.set_xticklabels([])
+
+                # Add overall title
+                fig.suptitle(setting.replace('_', ' ').upper(), fontsize=14, fontweight='bold', y=0.995)
+
+                plt.tight_layout(rect=[0, 0, 1, 0.99], h_pad=0.5)
+
+                # Save this page to the PDF
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+
+        print(f"Saved intermediate spectra plot: {outname}")
+
+    def plot_cross_correlation(self, xcorr_diagnostics, settings):
+        """
+        Plot cross-correlation fits for each setting and dither position.
+
+        Creates separate pages (figures) for each setting (channel-band combination)
+        and saves them as pages in a single PDF file.
+        Each page has 4 rows (one per dither) in landscape orientation, showing
+        the cross-correlation peak and its Gaussian fit.
+
+        Parameters
+        ----------
+        xcorr_diagnostics : list of dict or None
+            Cross-correlation diagnostic data for each dither (from shift_rsrf)
+            Each dict contains: lag_fit, maxlag, peakspec, fit, corr1, corr2, wave
+            None entries indicate shift_optimize was False for that dither
+        settings : list of str
+            Setting identifiers (e.g., 'ch1_short', 'ch2_medium') for each dither
+        """
+        # Get unique settings in order
+        unique_settings = []
+        for s in settings:
+            if s not in unique_settings:
+                unique_settings.append(s)
+
+        # Create PDF file to hold all pages
+        outname = self.source + '_xcorr_fits_v' + str(__version__) + '.pdf'
+
+        with PdfPages(outname) as pdf:
+            # Create a separate page for each setting
+            for setting in unique_settings:
+                # Find all indices for this setting
+                setting_indices = [i for i, s in enumerate(settings) if s == setting]
+                n_dithers = len(setting_indices)
+
+                # Create figure with landscape orientation: 1 column, 4 rows
+                fig = plt.figure(figsize=(12, 10))
+
+                for dither_idx, data_idx in enumerate(setting_indices):
+                    diag = xcorr_diagnostics[data_idx]
+
+                    # Create subplot - 4 rows, 1 column
+                    ax = fig.add_subplot(4, 1, dither_idx + 1)
+
+                    if diag is not None:
+                        # Extract diagnostic data
+                        maxlag = diag['maxlag']
+                        peakspec = diag['peakspec']
+                        fit = diag['fit']
+                        lag_fit = diag['lag_fit']
+
+                        # Plot cross-correlation peak
+                        lag_array = np.arange(maxlag*2) - maxlag + 1
+                        ax.plot(lag_array, peakspec, 'o-', color='C0', alpha=0.7,
+                               markersize=4, linewidth=1.5, label='Cross-correlation')
+
+                        # Plot Gaussian fit
+                        ax.plot(lag_array, fit(np.arange(maxlag*2)), '-', color='C1',
+                               linewidth=2.0, label='Gaussian fit')
+
+                        # Mark the fitted lag with a vertical line
+                        ax.axvline(lag_fit, color='C2', linestyle='--', linewidth=1.5,
+                                  alpha=0.7, label=f'Lag = {lag_fit:.2f}')
+
+                        # Format subplot
+                        ax.set_ylabel('Correlation', fontsize=10)
+                        ax.set_title(f'Dither {dither_idx+1} (lag={lag_fit:.2f})',
+                                    fontsize=10, loc='left', fontweight='bold')
+                        ax.grid(True, alpha=0.3, linestyle=':')
+                        ax.legend(fontsize=9, loc='best', framealpha=0.9)
+
+                    else:
+                        # No cross-correlation data (shift_optimize was False)
+                        ax.text(0.5, 0.5, 'No cross-correlation\n(shift_optimize=False)',
+                               ha='center', va='center', transform=ax.transAxes,
+                               fontsize=12, color='gray')
+                        ax.set_ylabel('Correlation', fontsize=10)
+                        ax.set_title(f'Dither {dither_idx+1}', fontsize=10, loc='left',
+                                    fontweight='bold')
+                        ax.set_xticks([])
+                        ax.set_yticks([])
+
+                    # Only show x-label and x-tick labels on bottom panel
+                    if dither_idx == n_dithers - 1 or dither_idx == 3:
+                        ax.set_xlabel('Lag (pixels)', fontsize=10)
+                    else:
+                        ax.set_xlabel('')
+                        if diag is not None:
+                            ax.set_xticklabels([])
+
+                # Add overall title
+                fig.suptitle(setting.replace('_', ' ').upper() + ' - Cross-Correlation Fits',
+                            fontsize=14, fontweight='bold', y=0.995)
+
+                plt.tight_layout(rect=[0, 0, 1, 0.99], h_pad=0.5)
+
+                # Save this page to the PDF
+                pdf.savefig(fig, bbox_inches='tight')
+                plt.close(fig)
+
+        print(f"Saved cross-correlation fits plot: {outname}")
