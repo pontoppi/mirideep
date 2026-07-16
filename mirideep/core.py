@@ -48,7 +48,7 @@ Klaus Pontoppidan (klaus.m.pontoppidan@jpl.nasa.gov)
 
 Version
 -------
-9.5 - Fixed background scale error bug, updated RSRFs
+9.6 - Added intermediate diagnostic plotting (spectra and cross-correlation fits)
 """
 
 import pickle
@@ -84,7 +84,7 @@ from .utils import *
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
 # Keep FITS file truncation warnings visible - these indicate data corruption
 warnings.filterwarnings(action='default', message='File may have been truncated')
-__version__ = 9.5
+__version__ = 9.6
 
 class MiriDeepSpec():
     '''
@@ -946,8 +946,6 @@ class MiriDeepSpec():
                 cutout = cube[iw,edge_b:edge_t,edge_l:edge_r]
                 yy, xx = np.mgrid[edge_b:edge_t, edge_l:edge_r]
 
-                #g_init = models.Gaussian2D(amplitude=np.nanmax(cutout),x_stddev=diff_s,y_stddev=diff_s,x_mean=boxsize,y_mean=boxsize,
-                #                           fixed={'theta':True})
                 a_init = models.AiryDisk2D(amplitude=np.nanmax(cutout),radius=diff_s,x_0=boxsize,y_0=boxsize)
                 c_init = models.Const2D(amplitude=np.nanmedian(cutout))
                 fitter = fitting.LMLSQFitter()
@@ -991,7 +989,6 @@ class MiriDeepSpec():
         corr1[~np.isfinite(corr1)] = 0
         corr2[~np.isfinite(corr2)] = 0
 
-        #corr = correlate(medfilt(corr1,1),medfilt(corr2,1),method='fft')
         corr = correlate(corr1,corr2,method='fft')
         lag =  np.argmax(corr[spec1d.size-maxlag:spec1d.size+maxlag]) - maxlag + 1
 
@@ -1029,21 +1026,6 @@ class MiriDeepSpec():
             print('cross correlation failed - no valid values. Assuming lag==0')
             lag_fit = 0
 
-        if np.mean(wave)>40:
-            fig = plt.figure(figsize=(20,9))
-            ax1 = fig.add_subplot(311)
-            ax2 = fig.add_subplot(312)
-            ax3 = fig.add_subplot(313)
-
-            ax1.plot(np.arange(maxlag*2) - maxlag + 1, peakspec)
-            ax1.plot(np.arange(maxlag*2) - maxlag + 1, fit(np.arange(maxlag*2)))
-
-            ax2.plot(corr1)
-            corr2_sh = np.interp(np.arange(corr2.size)-lag_fit,np.arange(corr2.size),corr2)
-            ax2.plot(corr2_sh)
-
-            ax3.plot((corr1+1)/(corr2_sh+1))
-            plt.show()
 
         if return_diagnostics:
             # Return diagnostic data for plotting
