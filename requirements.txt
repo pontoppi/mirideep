@@ -1,0 +1,12 @@
+# mirideep package requirements
+
+# Core dependencies
+numpy
+astropy
+astroquery
+
+# JWST pipeline
+jwst
+
+# Batch processing module dependencies
+pyyaml>=5.0
