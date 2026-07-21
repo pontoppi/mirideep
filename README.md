@@ -9,7 +9,7 @@ A Python package for calibrating high signal-to-noise JWST MIRI MRS (Mid-Infrare
 - **Multi-Channel Processing**: Handles all MIRI MRS channels (1-4) and bands (short, medium, long)
 - **Spectral Stitching**: Automated scaling and stitching of overlapping spectral segments
 - **Pipeline Integration**: Direct integration with JWST calibration pipeline stages 2-3
-- **Batch Processing**: Convenient scripts for processing multiple observations
+- **Batch Processing**: Parallel batch processing with YAML configuration support
 
 ## Installation
 
@@ -23,6 +23,7 @@ A Python package for calibrating high signal-to-noise JWST MIRI MRS (Mid-Infrare
 - Numpy
 - Matplotlib
 - Astroquery (for MAST data downloads)
+- PyYAML (for batch processing configuration)
 
 ### Install
 
@@ -88,6 +89,60 @@ md = MiriDeepSpec(source='my_source',
                   rrs={'ch1':1.4, 'ch2':1.3, 'ch3':1.2, 'ch4':1.1})
 md.run_extract()
 ```
+
+## Batch Processing (NEW)
+
+Process multiple observations in parallel with YAML configuration:
+
+### Create a configuration file (`reduce_config.yaml`):
+
+```yaml
+proposal_id: '1584'
+max_workers: 8  # Number of parallel threads
+
+# Pipeline steps
+run_dl: true
+run_step1: false
+run_step2: true
+run_step3: true
+
+# Observations
+observations:
+  - dir: data_mylup
+    target_short: mylup
+    target_name: MY-LUP
+    obs_id: 5
+  - dir: data_szcha
+    target_short: szcha
+    target_name: SZ-CHA
+    obs_id: 3
+```
+
+### Run batch processing:
+
+```bash
+# Use default settings (8 workers)
+python -m mirideep.batch_reduce reduce_config.yaml
+
+# Override thread count
+python -m mirideep.batch_reduce reduce_config.yaml --max-workers 4
+```
+
+### Or use Python API:
+
+```python
+from mirideep.batch_reduce import run_batch_reduction
+
+results = run_batch_reduction('reduce_config.yaml', max_workers=8)
+print(f"Success: {sum(1 for s in results.values() if s == 'success')}")
+```
+
+### Features:
+- **Parallel execution** with configurable thread count
+- **YAML configuration** for easy editing
+- **Real-time logging** of progress
+- **Robust error handling** - failed observations don't stop the batch
+- **Thread-safe** directory handling
 
 ## Examples
 

@@ -81,6 +81,23 @@ from photutils import centroids
 
 from .utils import *
 
+# Suppress ERFA dubious year warnings
+from erfa import ErfaWarning
+warnings.filterwarnings('ignore', category=ErfaWarning, message='.*dubious year.*')
+
+# Suppress scipy RuntimeWarnings about empty slices
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*Mean of empty slice.*')
+
+# Suppress numpy RuntimeWarnings about degrees of freedom
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*Degrees of freedom <= 0 for slice.*')
+
+# Suppress division warnings (expected when dividing by RSRF with zeros/nans)
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*invalid value encountered in divide.*')
+
+# Suppress astropy sigma clipping warnings about NaNs/infs (expected in raw spectral data)
+from astropy.utils.exceptions import AstropyWarning
+warnings.filterwarnings('ignore', category=AstropyWarning, message='.*Input data contains invalid values.*')
+
 warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
 # Keep FITS file truncation warnings visible - these indicate data corruption
 warnings.filterwarnings(action='default', message='File may have been truncated')
@@ -112,6 +129,8 @@ class MiriDeepSpec():
         Apply wavelength corrections
     single_shift : bool
         Use median shift for all dithers
+    scale_rsrf : bool
+        Apply amplitude scale factor to RSRF (default False)
     mask_ratio : float
         Ratio threshold for masking bad pixels
     source_cen : False or tuple
@@ -135,7 +154,7 @@ class MiriDeepSpec():
     def __init__(self,plot_centroid=False,plot_fringematch=False,shift_optimize=True,source='generic',save_intermediate=False,
                  bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'nod'},
                  rrs={'ch1':1.4,'ch2':1.4,'ch3':1.4,'ch4':1.4},standard='jena2',ch1_standard='hd163466_COM',
-                 wave_correct=True,single_shift=True,mask_ratio=20,centroid_type='1dg',
+                 wave_correct=True,single_shift=True,scale_rsrf=False,mask_ratio=20,centroid_type='1dg',
                  source_cen=False,scale_to_segment=False):
 
         # Input validation
@@ -205,6 +224,7 @@ class MiriDeepSpec():
         self.save_intermediate = save_intermediate
         self.wave_correct = wave_correct
         self.single_shift = single_shift
+        self.scale_rsrf = scale_rsrf
         self.mask_ratio = mask_ratio
         self.source_cen = source_cen
         self.centroid_type = centroid_type
@@ -342,19 +362,24 @@ class MiriDeepSpec():
                     if self.shift_optimize:
                         if self.save_intermediate:
                             lag, diagnostics = self.shift_rsrf(wave,spec1d,dither_rsrf,return_diagnostics=True)
+                            scale_factor = diagnostics['scale_factor']
                             xcorr_diagnostics_intermediate.append(diagnostics)
                         else:
-                            lag = self.shift_rsrf(wave,spec1d,dither_rsrf)
+                            lag, scale_factor = self.shift_rsrf(wave,spec1d,dither_rsrf)
                     else:
                         lag = 0
+                        scale_factor = 1.0
                         if self.save_intermediate:
                             xcorr_diagnostics_intermediate.append(None)
 
                     lags.append(lag)
+                    dither['scale_factor'] = scale_factor
+                    print(f"  {setting:12s}  Dither {dither['dither']}  Lag: {lag:.3g}  Scale: {scale_factor:.3g}")
 
                 #Find the best median lag per module
                 lag_med = np.median(lags)
-                print(lags, lag_med)
+                lag_std = np.std(lags)
+                print(f"{setting:12s}  Lag: {lag_med:.3g} +/- {lag_std:.3g}")
 
                 for ii,dither in enumerate(dithers):
 
@@ -376,6 +401,10 @@ class MiriDeepSpec():
                         rsrf_sh = np.interp(np.arange(dither_rsrf.size)-lag_med,np.arange(dither_rsrf.size),dither_rsrf)
                     else:
                         rsrf_sh = np.interp(np.arange(dither_rsrf.size)-lags[ii],np.arange(dither_rsrf.size),dither_rsrf)
+
+                    if self.scale_rsrf:
+                        rsrf_cont = savgol_filter(rsrf_sh,int(rsrf_sh.size/24.),2,mode='nearest')
+                        rsrf_sh = (rsrf_sh-rsrf_cont)*dither['scale_factor'] + rsrf_cont
 
                     spec1d_defringe = dither['spec1d']/rsrf_sh * model
 
@@ -974,8 +1003,8 @@ class MiriDeepSpec():
 
     def shift_rsrf(self,wave,spec1d,rsrf,maxlag = 19, return_diagnostics=False):
 
-        spec1d_cont = savgol_filter(spec1d,int(spec1d.size/16.),2,mode='nearest')
-        rsrf_cont = savgol_filter(rsrf,int(rsrf.size/16.),2,mode='nearest')
+        spec1d_cont = savgol_filter(spec1d,int(spec1d.size/24.),2,mode='nearest')
+        rsrf_cont = savgol_filter(rsrf,int(rsrf.size/24.),2,mode='nearest')
 
         corr1 = spec1d/spec1d_cont-np.mean(spec1d/spec1d_cont)
         stddev = np.std(corr1)
@@ -991,6 +1020,17 @@ class MiriDeepSpec():
 
         corr = correlate(corr1,corr2,method='fft')
         lag =  np.argmax(corr[spec1d.size-maxlag:spec1d.size+maxlag]) - maxlag + 1
+
+        # Calculate scale factor that minimizes std(corr1 - corr2_sh*scale_factor)
+        # Optimal solution: scale_factor = sum(corr1 * corr2_sh) / sum(corr2_sh^2)
+        corr2_sh = np.interp(np.arange(corr2.size)-lag, np.arange(corr2.size), corr2)
+        valid = np.isfinite(corr1) & np.isfinite(corr2_sh)
+        if np.sum(valid) > 0:
+            numerator = np.sum(corr1[valid] * corr2_sh[valid])
+            denominator = np.sum(corr2_sh[valid]**2)
+            scale_factor = numerator / denominator if denominator != 0 else 1.0
+        else:
+            scale_factor = 1.0
 
         model_gauss = models.Gaussian1D(amplitude=np.max(corr), mean=maxlag+1, stddev=0.5)
         model_gauss.amplitude.min = 0
@@ -1021,10 +1061,13 @@ class MiriDeepSpec():
 
             fit = fitter_gauss(model_total, np.arange(maxlag*2), peakspec, maxiter=1000)
             lag_fit = fit.mean_0.value - maxlag + 1
+            fit_succeeded = True
 
         except:
             print('cross correlation failed - no valid values. Assuming lag==0')
             lag_fit = 0
+            fit = None
+            fit_succeeded = False
 
 
         if return_diagnostics:
@@ -1034,13 +1077,15 @@ class MiriDeepSpec():
                 'maxlag': maxlag,
                 'peakspec': peakspec,
                 'fit': fit,
+                'fit_succeeded': fit_succeeded,
                 'corr1': corr1,
                 'corr2': corr2,
-                'wave': wave
+                'wave': wave,
+                'scale_factor': scale_factor
             }
             return lag_fit, diagnostics
 
-        return lag_fit
+        return lag_fit, scale_factor
 
     def writespec(self,wave,fd,std,bg,outname='spec1d.fits'):
         c1 = fits.Column(name='wavelength', array=wave, format='F', unit='micron')
