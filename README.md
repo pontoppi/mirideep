@@ -92,6 +92,8 @@ md.run_extract()
 
 ## Batch Processing (NEW)
 
+### Batch Data Reduction
+
 Process multiple observations in parallel with YAML configuration:
 
 ### Create a configuration file (`reduce_config.yaml`):
@@ -138,11 +140,62 @@ print(f"Success: {sum(1 for s in results.values() if s == 'success')}")
 ```
 
 ### Features:
-- **Parallel execution** with configurable thread count
+- **Parallel execution** with configurable process count
 - **YAML configuration** for easy editing
 - **Real-time logging** of progress
 - **Robust error handling** - failed observations don't stop the batch
-- **Thread-safe** directory handling
+- **Process isolation** - each observation runs independently
+
+### Batch Spectral Extraction
+
+Extract 1D spectra from multiple observations in parallel:
+
+#### Create extraction config (`extract_config.yaml`):
+
+```yaml
+max_workers: 4
+
+default_params:
+  standard: jena2
+  ch1_standard: hd163466_0723
+  rrs:
+    ch1: 1.4
+    ch2: 1.3
+    ch3: 1.2
+    ch4: 1.1
+  bg_types:
+    ch1: nod
+    ch2: nod
+    ch3: nod
+    ch4: nod
+  wave_correct: true
+
+observations:
+  - dir: data_twhya
+    source: twhya
+  - dir: data_aatau
+    source: aatau
+    wave_correct: false  # Override default
+```
+
+#### Run batch extraction:
+
+```bash
+# Use default settings (4 workers)
+python -m mirideep.batch_extract extract_config.yaml
+
+# Override worker count
+python -m mirideep.batch_extract extract_config.yaml --max-workers 2
+```
+
+#### Or use Python API:
+
+```python
+from mirideep.batch_extract import run_batch_extraction
+
+results = run_batch_extraction('extract_config.yaml', max_workers=4)
+print(f"Success: {sum(1 for s in results.values() if s == 'success')}")
+```
 
 ## Examples
 
@@ -214,8 +267,7 @@ MIT License - see [setup.py](setup.py) for details
 ## Citation
 
 If you use this package in your research, please cite:
-- Pontoppidan et al. (in prep)
-- JWST MIRI MRS calibration papers
+- Pontoppidan, K. M., et al. 2024, ApJ, 963, 2 ([doi:10.3847/1538-4357/ad20f0](https://doi.org/10.3847/1538-4357/ad20f0))
 
 ## Acknowledgments
 
