@@ -34,6 +34,9 @@ run_step3 : bool
     Run calwebb_spec3
 max_workers : int, optional
     Maximum parallel processes (default: 8)
+only : list of str, optional
+    Restrict processing to specific observations, matched against each
+    observation's `dir` or `target_short` (default: all observations)
 
 YAML Configuration Example
 ---------------------------
@@ -45,6 +48,12 @@ run_dl: true
 run_step1: false
 run_step2: true
 run_step3: true
+
+# Restrict a run to specific observations (matched by `dir` or
+# `target_short`). Omit or leave empty to process all observations.
+# only:
+#   - data_mylup
+#   - wsb52
 
 # Observations to process
 observations:
@@ -61,11 +70,14 @@ Usage Example
 -------------
 Command line usage:
     python -m mirideep.batch_reduce config.yaml --max-workers 4
+    python -m mirideep.batch_reduce config.yaml --only data_mylup wsb52
 
 Python usage:
     >>> from mirideep.batch_reduce import run_batch_reduction
     >>> results = run_batch_reduction('config.yaml', max_workers=8)
     >>> print(f"Success: {sum(1 for s in results.values() if s == 'success')}")
+    >>> # Reprocess only a subset of observations
+    >>> results = run_batch_reduction('config.yaml', only=['data_mylup'])
 
 Notes
 -----
@@ -222,10 +234,44 @@ def load_config(config_path: str) -> Dict:
     return config
 
 
+def select_observations(observations: List[Dict], only: Optional[List[str]] = None) -> List[Dict]:
+    """
+    Filter observations down to a requested subset.
+
+    Args:
+        observations: Full list of observation dicts from the config
+        only: List of identifiers to keep, matched against each observation's
+            `dir` or `target_short` (case-sensitive). If None or empty,
+            all observations are returned.
+
+    Returns:
+        Filtered list of observation dicts, in the original order
+
+    Raises:
+        ValueError: If an identifier in `only` matches no observation
+    """
+    if not only:
+        return observations
+
+    remaining = set(only)
+    selected = []
+    for obs in observations:
+        if obs.get('dir') in remaining or obs.get('target_short') in remaining:
+            selected.append(obs)
+            remaining.discard(obs.get('dir'))
+            remaining.discard(obs.get('target_short'))
+
+    if remaining:
+        raise ValueError(f"No observation matches: {sorted(remaining)}")
+
+    return selected
+
+
 def run_batch_reduction(
     config_path: str,
     max_workers: Optional[int] = None,
-    log_file: str = 'mirideep.log'
+    log_file: str = 'mirideep.log',
+    only: Optional[List[str]] = None
 ) -> Dict[str, str]:
     """
     Run batch reduction on multiple observations in parallel.
@@ -234,6 +280,9 @@ def run_batch_reduction(
         config_path: Path to YAML configuration file
         max_workers: Maximum number of parallel processes (overrides config, default: 8)
         log_file: Path to log file
+        only: Restrict processing to specific observations, matched against
+            each observation's `dir` or `target_short` (overrides the
+            config's `only` list if given; default: all observations)
 
     Returns:
         Dictionary mapping target_short to status ('success', 'failed', etc.)
@@ -241,13 +290,17 @@ def run_batch_reduction(
     Example:
         >>> results = run_batch_reduction('config.yaml', max_workers=4)
         >>> print(f"Success: {sum(1 for s in results.values() if s == 'success')}")
+        >>> # Reprocess only a subset of observations
+        >>> results = run_batch_reduction('config.yaml', only=['data_mylup'])
     """
     # Load configuration
     config = load_config(config_path)
 
     # Extract parameters
     proposal_id = config['proposal_id']
-    observations = config['observations']
+    if only is None:
+        only = config.get('only')
+    observations = select_observations(config['observations'], only)
 
     # Pipeline steps (default to False if not specified)
     run_dl = config.get('run_dl', False)
@@ -267,6 +320,8 @@ def run_batch_reduction(
 
     # Log configuration
     logger.info(f"Starting batch reduction for proposal {proposal_id}")
+    if only:
+        logger.info(f"Restricting to {len(observations)} observation(s): {only}")
     logger.info(f"Processing {len(observations)} observations with {max_workers} workers")
     logger.info(f"Pipeline steps - DL:{run_dl} Step1:{run_step1} Step2:{run_step2} Step3:{run_step3}")
 
@@ -329,6 +384,9 @@ Example YAML configuration:
         target_short: mylup
         target_name: MY-LUP
         obs_id: 5
+
+Reprocess only specific observations:
+    python -m mirideep.batch_reduce config.yaml --only data_mylup
         """
     )
     parser.add_argument(
@@ -348,6 +406,16 @@ Example YAML configuration:
         default='mirideep.log',
         help='Path to log file (default: mirideep.log)'
     )
+    parser.add_argument(
+        '--only',
+        type=str,
+        nargs='+',
+        default=None,
+        metavar='ID',
+        help='Restrict processing to specific observations, matched against '
+             'each observation\'s dir or target_short (overrides the config '
+             'file\'s only list; default: all observations)'
+    )
 
     args = parser.parse_args()
 
@@ -355,7 +423,8 @@ Example YAML configuration:
     results = run_batch_reduction(
         config_path=args.config,
         max_workers=args.max_workers,
-        log_file=args.log_file
+        log_file=args.log_file,
+        only=args.only
     )
 
     # Print summary
