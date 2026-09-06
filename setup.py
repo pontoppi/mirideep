@@ -7,7 +7,7 @@ setuptools.setup(
     author_email="kpontoppi@gmail.com",
     description="A package to calibrate high signal-to-noise MIRI MRS data",
     packages=['mirideep'],
-    package_data={'mirideep': ['rsrfs/*.npz','rsrfs/*.fits','rsrfs/*.csv','rsrfs/*.dat']},
+    package_data={'mirideep': ['rsrfs/*.npz','rsrfs/*.fits','rsrfs/*.csv','rsrfs/*.dat','rsrfs/*.yaml']},
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

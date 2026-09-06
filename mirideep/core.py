@@ -56,6 +56,7 @@ import os
 import warnings
 import copy
 
+import yaml
 import numpy as np
 from scipy.signal import savgol_filter,correlate,medfilt,find_peaks
 from scipy.stats import norm
@@ -102,6 +103,25 @@ warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
 # Keep FITS file truncation warnings visible - these indicate data corruption
 warnings.filterwarnings(action='default', message='File may have been truncated')
 __version__ = 9.6
+
+_CALIBRATORS_CACHE = None
+
+def _load_calibrators():
+    """Load and cache mirideep/rsrfs/calibrators.yaml (module-level, read once)."""
+    global _CALIBRATORS_CACHE
+    if _CALIBRATORS_CACHE is None:
+        path = os.path.join(os.path.dirname(__file__), 'rsrfs', 'calibrators.yaml')
+        with open(path, 'r') as f:
+            _CALIBRATORS_CACHE = yaml.safe_load(f)['calibrators']
+    return _CALIBRATORS_CACHE
+
+def _get_calibrator(standard):
+    """Look up a calibrator entry by name; raise ValueError if not found."""
+    calibrators = _load_calibrators()
+    if standard not in calibrators:
+        valid = ', '.join(sorted(calibrators))
+        raise ValueError(f"Unknown or unsupported standard '{standard}'. Valid standards: {valid}")
+    return calibrators[standard]
 
 class MiriDeepSpec():
     '''
@@ -528,51 +548,25 @@ class MiriDeepSpec():
 
         print(f"Averaged {len(results_list)} spectra:")
 
-    def standard_model(self,wave,standard='jena'):
-        #nn = 6 # flatness of silicate feature
-        #sil_cen = 10.2 # center of silicate feature
-        #sil_amp = 0.035 # amplitude of silicate feature
-        #sil_width = 1.5
-        #eta = np.ones(wave.size)*0.9
-        #eta += sil_amp * np.exp(-((wave - sil_cen) / sil_width)**nn)
-        
+    def standard_model(self,wave,standard='jena2'):
         emissivity_scl = (self.emissivity['Emissivity']-0.78)/7.0+0.85 + 0.12*np.exp(-(self.emissivity['Wavelength']-29)**2/9**2)
-        
+
         eta = np.interp(wave,self.emissivity['Wavelength'],emissivity_scl)
 
-        if standard == 'jena':
-            temp = 199*u.K
-            scale = 5.77e8
-            bb = BlackBody(temperature=temp)
-            model = (bb(wave*u.micron) * scale).value * eta
-        if standard == 'jena2':
-            temp = 204*u.K
-            scale = 1.16e9
-            bb = BlackBody(temperature=temp)
-            model = (bb(wave*u.micron) * scale).value * eta
-        if standard == 'athalia':
-            temp = 194*u.K
-            scale = 5.6e8
-            bb = BlackBody(temperature=temp)
-            model = (bb(wave*u.micron) * scale).value * eta
-        if standard == 'athalia2':
-            temp = 206*u.K
-            scale = 8.50e8
-            bb = BlackBody(temperature=temp)
-            model = (bb(wave*u.micron) * scale).value * eta
-        if standard == 'athalia3':
-            temp = 231*u.K
-            scale = 10.3e8
-            bb = BlackBody(temperature=temp)
-            model = (bb(wave*u.micron) * scale).value * eta
-        if 'hd163466' in standard:
-            vsh = 0
-            model_data = fits.getdata(os.path.join(self.local_path,'hd163466_mod_003.fits'),1)
-            gauss_kernel = Gaussian1DKernel(100)
+        entry = _get_calibrator(standard)
+
+        if entry['type'] == 'asteroid':
+            bb = BlackBody(temperature=entry['temp_k']*u.K)
+            model = (bb(wave*u.micron) * entry['scale']).value * eta
+        elif entry['type'] == 'star':
+            model_data = fits.getdata(os.path.join(self.local_path,entry['model_file']),1)
+            gauss_kernel = Gaussian1DKernel(entry['smooth_kernel_width'])
             model_conv = convolve(model_data['flux'], gauss_kernel)
-            model_flux = model_conv*3.34e4*model_data['wavelength']**2
-            model_wave = model_data['wavelength']/1e4 * (1+vsh/300000)
+            model_flux = model_conv*entry['flux_scale']*model_data['wavelength']**2
+            model_wave = model_data['wavelength']/1e4 * (1+entry['vshift_km_s']/300000)
             model = np.interp(wave,model_wave,model_flux)
+        else:
+            raise ValueError(f"Unknown calibrator type '{entry['type']}' for standard '{standard}'")
 
         return model
 
@@ -620,40 +614,17 @@ class MiriDeepSpec():
         if ch1_standard is None:
             ch1_standard = self.ch1_standard[0]
 
-        if ch1_standard=='hd163466_0823':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0823_rsrf_9.5.npz'), 'rb')
-        elif ch1_standard=='hd163466_0723':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0723_rsrf_9.5.npz'), 'rb')
-        elif ch1_standard=='hd163466_0624':
-            rsrf_file_ch1 = open(os.path.join(self.local_path,'hd163466_0624_rsrf_9.5.npz'), 'rb')
-        elif ch1_standard=='hd163466_COM':
-            print("This option is deprecated")
-            breakpoint()
-        else:
-            print('Unknown channel 1 standard')
-            breakpoint()
+        ch1_entry = _get_calibrator(ch1_standard)
+        if 'rsrf_file_ch1' not in ch1_entry:
+            raise ValueError(f"Standard '{ch1_standard}' has no rsrf_file_ch1 defined")
+        with open(os.path.join(self.local_path,ch1_entry['rsrf_file_ch1']), 'rb') as f:
+            self.rsrf_ch1 = pickle.load(f)
 
-        self.rsrf_ch1 = pickle.load(rsrf_file_ch1)
-        rsrf_file_ch1.close()
-
-        if standard=='athalia':
-            rsrf_file = open(os.path.join(self.local_path,'athalia_rsrf_9.5.npz'), 'rb')
-        elif standard=='athalia2':
-            rsrf_file = open(os.path.join(self.local_path,'athalia2_rsrf_9.5.npz'), 'rb')
-        elif standard=='athalia3':
-            rsrf_file = open(os.path.join(self.local_path,'athalia3_rsrf_9.5.npz'), 'rb')
-        elif standard=='jena2':
-            rsrf_file = open(os.path.join(self.local_path,'jena2_rsrf_9.5.npz'), 'rb')
-        elif standard=='jena':
-            print("This option is deprecated")
-            breakpoint()
-            #rsrf_file = open(os.path.join(self.local_path,'jena_rsrf_8.0.npz'), 'rb')
-        else:
-            print('Unknown standard')
-            breakpoint()
-
-        self.rsrf = pickle.load(rsrf_file)
-        rsrf_file.close()
+        entry = _get_calibrator(standard)
+        if 'rsrf_file' not in entry:
+            raise ValueError(f"Standard '{standard}' has no rsrf_file defined")
+        with open(os.path.join(self.local_path,entry['rsrf_file']), 'rb') as f:
+            self.rsrf = pickle.load(f)
 
         # Finally get asteroid emissivity spectrum
         self.emissivity = ascii.read(os.path.join(self.local_path,'emissivity.dat'))
