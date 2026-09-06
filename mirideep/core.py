@@ -40,7 +40,7 @@ Usage Example
 ...                   bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'nod'},
 ...                   standard='jena2')
 >>> md.run_extract()
-# Outputs: mylup_1d_v9.5.fits
+# Outputs: mylup_1d_v9.6.fits
 
 Author
 ------

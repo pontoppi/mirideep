@@ -102,7 +102,7 @@ Notes
 - Extractions are processed in parallel using ProcessPoolExecutor
 - Each extraction runs in its own process with isolated working directory
 - Failed extractions don't stop the batch - errors are logged
-- Output 1D spectra are saved as *_1d_v9.5.fits in each observation directory
+- Output 1D spectra are saved as *_1d_v9.6.fits in each observation directory
 
 Author
 ------

@@ -77,7 +77,7 @@ md = MiriDeepSpec(source='mylup',
 md.run_extract()
 ```
 
-Output: `mylup_1d_v9.5.fits` - a 1D spectrum in FITS table format with columns for wavelength, flux density, uncertainty, and background.
+Output: `mylup_1d_v9.6.fits` - a 1D spectrum in FITS table format with columns for wavelength, flux density, uncertainty, and background.
 
 ### 3. High-Background Sources
 
@@ -242,7 +242,8 @@ The extracted 1D spectrum is saved as a FITS binary table with columns:
 
 ## Version History
 
-- **v9.5** (Current): Fixed bug recording background scale error as spectral scale error; updated RSRFs
+- **v9.6** (Current): Added intermediate diagnostic plotting (spectra and cross-correlation fits); moved hardcoded calibrator data to `rsrfs/calibrators.yaml`
+- **v9.5**: Fixed bug recording background scale error as spectral scale error; updated RSRFs
 - **v9.1-9.4**: Extensive work on high-background subtraction and annulus-based estimation
 - **v8.x**: Updated RSRFs with new pixel replacement algorithm
 - **v7.x and earlier**: Core extraction and fringe removal pipeline

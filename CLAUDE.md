@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 mirideep is a Python package for calibrating high signal-to-noise JWST MIRI MRS (Mid-Infrared Medium Resolution Spectrometer) data. The package performs advanced spectral extraction, fringe removal, and background subtraction beyond the standard JWST pipeline processing.
 
 **Author:** Klaus Pontoppidan (klaus.m.pontoppidan@jpl.nasa.gov)  
-**Current Version:** 9.5
+**Current Version:** 9.6
 
 ## Installation & Setup
 
@@ -46,6 +46,7 @@ The package includes calibration data (RSRFs - Relative Spectral Response Functi
 - Numpy archives (.npz) and FITS files containing reference RSRF data for different calibration sources
 - Multiple versions (5.0, 6.0, 6.1, 6.3, 7.1, 8.0, 8.1, 8.2, 8.3, 8.4, 9.5)
 - CSV/DAT files for wavelength calibration and emissivity tables
+- `calibrators.yaml`: per-standard calibrator definitions (asteroid BlackBody temp/scale or star model file, plus RSRF filenames), loaded by `standard_model()`/`get_rsrf()` in core.py
 
 **mirideep/examples/**
 - `run.py`: Example extraction script for mylup observation (program 1584)
@@ -111,6 +112,7 @@ This reduces systematic uncertainties from calibrator choice.
 ### Version History
 
 Recent changes focus on background subtraction improvements:
+- v9.6: Added intermediate diagnostic plotting; moved hardcoded calibrator data (asteroid model parameters, star model files, RSRF filenames) to `rsrfs/calibrators.yaml`
 - v9.5: Fixed bug recording background scale error as spectral scale error
 - v9.1-9.5: Extensive work on high-background subtraction and annulus-based estimation
 - v8.x: Updated RSRFs with new pixel replacement algorithm
@@ -163,7 +165,7 @@ md = MiriDeepSpec(source='mylup', save_intermediate=True, standard='jena2',
                   bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'nod'},
                   wave_correct=True, ch1_standard='hd163466_0723')
 md.run_extract()
-# Output: mylup_1d_v9.5.fits
+# Output: mylup_1d_v9.6.fits
 
 # High-background source with annulus subtraction
 md = MiriDeepSpec(source='my_source', 
