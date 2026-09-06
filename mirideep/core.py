@@ -374,7 +374,10 @@ class MiriDeepSpec():
 
                     lags.append(lag)
                     dither['scale_factor'] = scale_factor
-                    print(f"  {setting:12s}  Dither {dither['dither']}  Lag: {lag:.3g}  Scale: {scale_factor:.3g}")
+                    if self.scale_rsrf:
+                        print(f"  {setting:12s}  Dither {dither['dither']}  Lag: {lag:.3g}  Scale: {scale_factor:.3g}")
+                    else:
+                        print(f"  {setting:12s}  Dither {dither['dither']}  Lag: {lag:.3g}")
 
                 #Find the best median lag per module
                 lag_med = np.median(lags)
