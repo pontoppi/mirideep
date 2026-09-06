@@ -17,25 +17,25 @@ calibrators:
     type: asteroid
     temp_k: 204
     scale: 1.16e+9
-    rsrf_file: jena2_rsrf_9.5.npz
+    rsrf_file: jena2_rsrf_9.6.npz
 
   athalia:
     type: asteroid
     temp_k: 194
     scale: 5.6e+8
-    rsrf_file: athalia_rsrf_9.5.npz
+    rsrf_file: athalia_rsrf_9.6.npz
 
   athalia2:
     type: asteroid
     temp_k: 206
     scale: 8.50e+8
-    rsrf_file: athalia2_rsrf_9.5.npz
+    rsrf_file: athalia2_rsrf_9.6.npz
 
   athalia3:
     type: asteroid
     temp_k: 231
     scale: 10.3e+8
-    rsrf_file: athalia3_rsrf_9.5.npz
+    rsrf_file: athalia3_rsrf_9.6.npz
 
   # --- Star standards (tabulated model spectrum file) ---
   hd163466_0823:
@@ -44,7 +44,7 @@ calibrators:
     flux_scale: 3.34e+4
     smooth_kernel_width: 100
     vshift_km_s: 0
-    rsrf_file_ch1: hd163466_0823_rsrf_9.5.npz
+    rsrf_file_ch1: hd163466_0823_rsrf_9.6.npz
 
   hd163466_0723:
     type: star
@@ -52,7 +52,7 @@ calibrators:
     flux_scale: 3.34e+4
     smooth_kernel_width: 100
     vshift_km_s: 0
-    rsrf_file_ch1: hd163466_0723_rsrf_9.5.npz
+    rsrf_file_ch1: hd163466_0723_rsrf_9.6.npz
 
   hd163466_0624:
     type: star
@@ -60,4 +60,4 @@ calibrators:
     flux_scale: 3.34e+4
     smooth_kernel_width: 100
     vshift_km_s: 0
-    rsrf_file_ch1: hd163466_0624_rsrf_9.5.npz
+    rsrf_file_ch1: hd163466_0624_rsrf_9.6.npz
