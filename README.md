@@ -227,7 +227,7 @@ python run.py         # Extract spectrum
 ### Calibration Sources
 
 - `standard`: Calibration source for channels 2-4 (default: 'jena2')
-- `ch1_standard`: Calibration source for channel 1 (default: 'hd163466_COM')
+- `ch1_standard`: Calibration source for channel 1 (default: 'hd163466_0723')
 
 See [CLAUDE.md](CLAUDE.md) for complete parameter documentation and architecture details.
 

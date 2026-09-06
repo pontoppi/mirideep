@@ -173,7 +173,7 @@ class MiriDeepSpec():
 
     def __init__(self,plot_centroid=False,plot_fringematch=False,shift_optimize=True,source='generic',save_intermediate=False,
                  bg_types={'ch1':'nod','ch2':'nod','ch3':'nod','ch4':'nod'},
-                 rrs={'ch1':1.4,'ch2':1.4,'ch3':1.4,'ch4':1.4},standard='jena2',ch1_standard='hd163466_COM',
+                 rrs={'ch1':1.4,'ch2':1.4,'ch3':1.4,'ch4':1.4},standard='jena2',ch1_standard='hd163466_0723',
                  wave_correct=True,single_shift=True,scale_rsrf=False,mask_ratio=20,centroid_type='1dg',
                  source_cen=False,scale_to_segment=False):
 
