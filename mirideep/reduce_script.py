@@ -95,7 +95,7 @@ def reduce(path='./', target_short='wsb52', target_name='WSB-52', obs_id=None, p
         my_session = Observations.login(token=os.environ['MAST_API_TOKEN'])
 
         if obs_id:
-            missions = MastMissions(mission='jwst')
+            missions = MastMissions(mission='jwst', mast_token=os.environ['MAST_API_TOKEN'])
             obs = missions.query_criteria(program=proposal_id,observtn=obs_id,productLevel='2a',exp_type='MIR_MRS')
             products = missions.get_product_list(obs)
             condition = np.char.endswith(products['filename'],'rate.fits')

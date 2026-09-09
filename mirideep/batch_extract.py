@@ -211,7 +211,8 @@ def extract_observation_impl(
             'rrs': obs.get('rrs', {'ch1': 1.4, 'ch2': 1.3, 'ch3': 1.2, 'ch4': 1.1}),
             'bg_types': obs.get('bg_types', {'ch1': 'nod', 'ch2': 'nod', 'ch3': 'nod', 'ch4': 'nod'}),
             'wave_correct': obs.get('wave_correct', True),
-            'plot_centroid': obs.get('plot_centroid', False)
+            'plot_centroid': obs.get('plot_centroid', False),
+            'scale_rsrf': obs.get('scale_rsrf', False)
         }
 
         # Add optional source_cen if provided
